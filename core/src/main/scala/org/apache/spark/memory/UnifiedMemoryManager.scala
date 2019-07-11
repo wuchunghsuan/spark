@@ -197,6 +197,8 @@ object UnifiedMemoryManager {
 
   def apply(conf: SparkConf, numCores: Int): UnifiedMemoryManager = {
     val maxMemory = getMaxMemory(conf)
+    // OPS log
+    println("maxMemory-" + maxMemory.toString())
     new UnifiedMemoryManager(
       conf,
       maxHeapMemory = maxMemory,

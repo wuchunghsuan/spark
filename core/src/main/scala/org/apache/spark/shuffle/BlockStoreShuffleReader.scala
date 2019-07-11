@@ -42,6 +42,10 @@ private[spark] class BlockStoreShuffleReader[K, C](
 
   /** Read the combined key-values for this reduce task */
   override def read(): Iterator[Product2[K, C]] = {
+    // OPS log
+    val start = System.currentTimeMillis()
+    context.taskMetrics().setOpsFetchStart(start)
+
     val wrappedStreams = new ShuffleBlockFetcherIterator(
       context,
       blockManager.shuffleClient,
@@ -93,6 +97,11 @@ private[spark] class BlockStoreShuffleReader[K, C](
       interruptibleIter.asInstanceOf[Iterator[Product2[K, C]]]
     }
 
+    // OPS log
+    val sortTime = System.currentTimeMillis()
+    // context.taskMetrics().incOpsFetchTime(sortTime - start)
+    context.taskMetrics().setOpsSortStart(sortTime)
+
     // Sort the output if there is a sort ordering defined.
     val resultIter = dep.keyOrdering match {
       case Some(keyOrd: Ordering[K]) =>
@@ -111,6 +120,9 @@ private[spark] class BlockStoreShuffleReader[K, C](
       case None =>
         aggregatedIter
     }
+
+    // OPS log
+    context.taskMetrics().setOpsReduceStart(System.currentTimeMillis())
 
     resultIter match {
       case _: InterruptibleIterator[Product2[K, C]] => resultIter

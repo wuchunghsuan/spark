@@ -24,6 +24,7 @@ import java.util.Properties
 
 import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 
 /**
@@ -66,13 +67,16 @@ private[spark] class ResultTask[T, U](
     isBarrier: Boolean = false)
   extends Task[U](stageId, stageAttemptId, partition.index, localProperties, serializedTaskMetrics,
     jobId, appId, appAttemptId, isBarrier)
-  with Serializable {
+  with Serializable with Logging{
 
   @transient private[this] val preferredLocs: Seq[TaskLocation] = {
     if (locs == null) Nil else locs.toSet.toSeq
   }
 
   override def runTask(context: TaskContext): U = {
+    // OPS log
+    val start = System.currentTimeMillis()
+
     // Deserialize the RDD and the func using the broadcast variables.
     val threadMXBean = ManagementFactory.getThreadMXBean
     val deserializeStartTime = System.currentTimeMillis()
@@ -87,7 +91,30 @@ private[spark] class ResultTask[T, U](
       threadMXBean.getCurrentThreadCpuTime - deserializeStartCpuTime
     } else 0L
 
-    func(context, rdd.iterator(partition, context))
+    val ret = func(context, rdd.iterator(partition, context))
+
+    // OPS log
+    val stop = System.currentTimeMillis()
+    println("[OPS]-Reduce-" + stageId.toString()
+        + "-" + appId.get
+        + "-" + context.taskAttemptId().toString()
+        + "-time"
+        + "-" + start.toString() // task start
+        + "-" + context.taskMetrics().opsFetchStart.toString() // Fetch time
+        + "-" + context.taskMetrics().opsSortStart.toString() // Sort time
+        + "-" + context.taskMetrics().opsReduceStart.toString() // Reduce time
+        + "-" + stop.toString() // task stop
+        + "-" + context.taskMetrics().opsSpillTime.toString() // Spill time
+        + "-shuffleRead"
+        + "-" + context.taskMetrics().shuffleReadMetrics.fetchWaitTime.toString()
+        + "-" + context.taskMetrics().shuffleReadMetrics.totalBytesRead.toString()
+        + "-" + context.taskMetrics().shuffleReadMetrics.remoteBytesRead.toString()
+        + "-spill"
+        + "-" + context.taskMetrics().memoryBytesSpilled.toString()
+        + "-" + context.taskMetrics().diskBytesSpilled.toString()
+        + "-" + context.taskMetrics().opsSpillNum.toString()
+        )
+    return ret
   }
 
   // This is only callable on the driver side.

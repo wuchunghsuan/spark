@@ -39,6 +39,7 @@ import org.apache.spark.ShuffleDependency;
 import org.apache.spark.SparkConf;
 import org.apache.spark.TaskContext;
 import org.apache.spark.executor.ShuffleWriteMetrics;
+import org.apache.spark.executor.TaskMetrics;
 import org.apache.spark.scheduler.MapStatus;
 import org.apache.spark.scheduler.MapStatus$;
 import org.apache.spark.serializer.Serializer;
@@ -91,6 +92,9 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
   @Nullable private MapStatus mapStatus;
   private long[] partitionLengths;
 
+  // OPS log
+  private TaskMetrics taskMetrics;
+
   /**
    * Are we in the process of stopping? Because map tasks can call stop() with success = true
    * and then call stop() with success = false if they get an exception, we want to make sure
@@ -115,6 +119,7 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     this.partitioner = dep.partitioner();
     this.numPartitions = partitioner.numPartitions();
     this.writeMetrics = taskContext.taskMetrics().shuffleWriteMetrics();
+    this.taskMetrics = taskContext.taskMetrics();
     this.serializer = dep.serializer();
     this.shuffleBlockResolver = shuffleBlockResolver;
   }
@@ -122,6 +127,10 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
   @Override
   public void write(Iterator<Product2<K, V>> records) throws IOException {
     assert (partitionWriters == null);
+    // OPS log
+    Long start = System.currentTimeMillis();
+    this.taskMetrics.setOpsSortStart(start);
+
     if (!records.hasNext()) {
       partitionLengths = new long[numPartitions];
       shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, null);
@@ -168,6 +177,9 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
       }
     }
     mapStatus = MapStatus$.MODULE$.apply(blockManager.shuffleServerId(), partitionLengths);
+
+    // OPS log
+    this.taskMetrics.incOpsSpillTime(System.currentTimeMillis() - start);
   }
 
   @VisibleForTesting
@@ -181,6 +193,9 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
    * @return array of lengths, in bytes, of each partition of the file (used by map output tracker).
    */
   private long[] writePartitionedFile(File outputFile) throws IOException {
+    // OPS log
+
+
     // Track location of the partition starts in the output file
     final long[] lengths = new long[numPartitions];
     if (partitionWriters == null) {

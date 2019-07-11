@@ -236,8 +236,15 @@ private[spark] class ExternalSorter[K, V, C](
    * @param collection whichever collection we're using (map or buffer)
    */
   override protected[this] def spill(collection: WritablePartitionedPairCollection[K, C]): Unit = {
+    // OPS log
+    val start = System.currentTimeMillis()
+
     val inMemoryIterator = collection.destructiveSortedWritablePartitionedIterator(comparator)
     val spillFile = spillMemoryIteratorToDisk(inMemoryIterator)
+
+    // OPS log
+    context.taskMetrics().incOpsSpillTime(System.currentTimeMillis() - start)
+
     spills += spillFile
   }
 

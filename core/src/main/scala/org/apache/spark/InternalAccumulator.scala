@@ -42,6 +42,14 @@ private[spark] object InternalAccumulator {
   val PEAK_EXECUTION_MEMORY = METRICS_PREFIX + "peakExecutionMemory"
   val UPDATED_BLOCK_STATUSES = METRICS_PREFIX + "updatedBlockStatuses"
   val TEST_ACCUM = METRICS_PREFIX + "testAccumulator"
+  val OPS_SPILL_TIME = METRICS_PREFIX + "opsSpillTime"
+  val OPS_FETCH_TIME = METRICS_PREFIX + "opsFetchTime"
+  val OPS_SORT_TIME = METRICS_PREFIX + "opsSortTime"
+  val OPS_MAP_START = METRICS_PREFIX + "opsMapStart"
+  val OPS_REDUCE_START = METRICS_PREFIX + "opsReduceStart"
+  val OPS_SORT_START = METRICS_PREFIX + "opsSortStart"
+  val OPS_FETCH_START = METRICS_PREFIX + "opsFetchStart"
+  val OPS_SPILL_START = METRICS_PREFIX + "opsSpillStart"
 
   // scalastyle:off
 

@@ -78,6 +78,10 @@ private[spark] class ShuffleMapTask(
   }
 
   override def runTask(context: TaskContext): MapStatus = {
+    // OPS log
+    val start = System.currentTimeMillis()
+    // context.taskMetrics().setOpsMapStart(start)
+
     // Deserialize the RDD using the broadcast variable.
     val threadMXBean = ManagementFactory.getThreadMXBean
     val deserializeStartTime = System.currentTimeMillis()
@@ -96,8 +100,32 @@ private[spark] class ShuffleMapTask(
     try {
       val manager = SparkEnv.get.shuffleManager
       writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
+      // OPS log
+      println(dep.shuffleHandle.toString())
+      val start = System.currentTimeMillis()
+      
       writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
-      writer.stop(success = true).get
+      val ret = writer.stop(success = true).get
+
+      // OPS log
+      val stop = System.currentTimeMillis()
+      println("[OPS]-Map-" + stageId.toString()
+          + "-" + appId.get
+          + "-" + context.taskAttemptId().toString()
+          + "-time"
+          + "-" + start.toString() // map start
+          + "-" + context.taskMetrics().opsSortStart.toString() // sort start
+          + "-" + stop.toString() // task stop
+          + "-" + context.taskMetrics().opsSpillTime.toString() // Spill time
+          + "-shuffleWrite"
+          + "-" + context.taskMetrics().shuffleWriteMetrics.writeTime.toString()
+          + "-" + context.taskMetrics().shuffleWriteMetrics.bytesWritten.toString()
+          + "-spill"
+          + "-" + context.taskMetrics().memoryBytesSpilled.toString()
+          + "-" + context.taskMetrics().diskBytesSpilled.toString()
+          + "-" + context.taskMetrics().opsSpillNum.toString()
+          )
+      return ret
     } catch {
       case e: Exception =>
         try {

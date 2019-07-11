@@ -49,6 +49,10 @@ private[spark] class SortShuffleWriter[K, V, C](
 
   /** Write a bunch of records to this task's output */
   override def write(records: Iterator[Product2[K, V]]): Unit = {
+    // OPS log
+    val start = System.currentTimeMillis()
+    context.taskMetrics().setOpsSortStart(start)
+
     sorter = if (dep.mapSideCombine) {
       new ExternalSorter[K, V, C](
         context, dep.aggregator, Some(dep.partitioner), dep.keyOrdering, dep.serializer)
@@ -72,6 +76,9 @@ private[spark] class SortShuffleWriter[K, V, C](
       shuffleBlockResolver.writeIndexFileAndCommit(dep.shuffleId, mapId, partitionLengths, tmp)
       mapStatus = MapStatus(blockManager.shuffleServerId, partitionLengths)
     } finally {
+      // OPS log
+      context.taskMetrics().incOpsSortTime(System.currentTimeMillis() - start)
+
       if (tmp.exists() && !tmp.delete()) {
         logError(s"Error while deleting temp file ${tmp.getAbsolutePath}")
       }

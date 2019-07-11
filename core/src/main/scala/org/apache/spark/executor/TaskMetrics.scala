@@ -55,6 +55,14 @@ class TaskMetrics private[spark] () extends Serializable {
   private val _diskBytesSpilled = new LongAccumulator
   private val _peakExecutionMemory = new LongAccumulator
   private val _updatedBlockStatuses = new CollectionAccumulator[(BlockId, BlockStatus)]
+  private val _opsSpillTime = new LongAccumulator
+  private val _opsFetchTime = new LongAccumulator
+  private val _opsSortTime = new LongAccumulator
+  private val _opsMapStart = new LongAccumulator
+  private val _opsReduceStart = new LongAccumulator
+  private val _opsSortStart = new LongAccumulator
+  private val _opsFetchStart = new LongAccumulator
+  private val _opsSpillStart = new LongAccumulator
 
   /**
    * Time taken on the executor to deserialize this task.
@@ -125,6 +133,17 @@ class TaskMetrics private[spark] () extends Serializable {
     _updatedBlockStatuses.value.asScala
   }
 
+  def opsSpillTime: Long = _opsSpillTime.sum
+  def opsSpillNum: Long = _opsSpillTime.count
+  def opsFetchTime: Long = _opsFetchTime.sum
+  def opsSortTime: Long = _opsSortTime.sum
+
+  def opsMapStart: Long = _opsMapStart.sum
+  def opsReduceStart: Long = _opsReduceStart.sum
+  def opsSortStart: Long = _opsSortStart.sum
+  def opsFetchStart: Long = _opsFetchStart.sum
+  def opsSpillStart: Long = _opsSpillStart.sum
+
   // Setters and increment-ers
   private[spark] def setExecutorDeserializeTime(v: Long): Unit =
     _executorDeserializeTime.setValue(v)
@@ -145,6 +164,14 @@ class TaskMetrics private[spark] () extends Serializable {
     _updatedBlockStatuses.setValue(v)
   private[spark] def setUpdatedBlockStatuses(v: Seq[(BlockId, BlockStatus)]): Unit =
     _updatedBlockStatuses.setValue(v.asJava)
+  private[spark] def incOpsSpillTime(v: Long): Unit = _opsSpillTime.add(v)
+  private[spark] def incOpsFetchTime(v: Long): Unit = _opsFetchTime.add(v)
+  private[spark] def incOpsSortTime(v: Long): Unit = _opsSortTime.add(v)
+  private[spark] def setOpsMapStart(v: Long): Unit = _opsMapStart.add(v)
+  private[spark] def setOpsReduceStart(v: Long): Unit = _opsReduceStart.add(v)
+  private[spark] def setOpsSortStart(v: Long): Unit = _opsSortStart.add(v)
+  private[spark] def setOpsFetchStart(v: Long): Unit = _opsFetchStart.add(v)
+  private[spark] def setOpsSpillStart(v: Long): Unit = _opsSpillStart.add(v)
 
   /**
    * Metrics related to reading data from a [[org.apache.spark.rdd.HadoopRDD]] or from persisted
@@ -218,6 +245,14 @@ class TaskMetrics private[spark] () extends Serializable {
     DISK_BYTES_SPILLED -> _diskBytesSpilled,
     PEAK_EXECUTION_MEMORY -> _peakExecutionMemory,
     UPDATED_BLOCK_STATUSES -> _updatedBlockStatuses,
+    OPS_SPILL_TIME -> _opsSpillTime,
+    OPS_FETCH_TIME -> _opsFetchTime,
+    OPS_SORT_TIME -> _opsSortTime,
+    OPS_MAP_START -> _opsMapStart,
+    OPS_REDUCE_START -> _opsReduceStart,
+    OPS_SORT_START -> _opsSortStart,
+    OPS_FETCH_START -> _opsFetchStart,
+    OPS_SPILL_START -> _opsSpillStart,
     shuffleRead.REMOTE_BLOCKS_FETCHED -> shuffleReadMetrics._remoteBlocksFetched,
     shuffleRead.LOCAL_BLOCKS_FETCHED -> shuffleReadMetrics._localBlocksFetched,
     shuffleRead.REMOTE_BYTES_READ -> shuffleReadMetrics._remoteBytesRead,
