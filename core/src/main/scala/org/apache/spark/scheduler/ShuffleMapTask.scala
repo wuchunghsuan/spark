@@ -79,6 +79,9 @@ private[spark] class ShuffleMapTask(
 
   override def runTask(context: TaskContext): MapStatus = {
     // OPS log
+    if (this.isOpsMaster) {
+      println("OpsMaster Here!")
+    }
     val start = System.currentTimeMillis()
     // context.taskMetrics().setOpsMapStart(start)
 

@@ -201,7 +201,14 @@ private[spark] class Executor(
   private[executor] def numRunningTasks: Int = runningTasks.size()
 
   def launchTask(context: ExecutorBackend, taskDescription: TaskDescription): Unit = {
-    val tr = new TaskRunner(context, taskDescription)
+    // OPS
+    var isOpsMaster = false
+    if(taskDescription.index == 0) {
+      println("Get master. Task index: " + taskDescription.index)
+      isOpsMaster = true
+    }
+
+    val tr = new TaskRunner(context, taskDescription, isOpsMaster)
     runningTasks.put(taskDescription.taskId, tr)
     threadPool.execute(tr)
   }
@@ -272,7 +279,8 @@ private[spark] class Executor(
 
   class TaskRunner(
       execBackend: ExecutorBackend,
-      private val taskDescription: TaskDescription)
+      private val taskDescription: TaskDescription,
+      private val isOpsMaster: Boolean)
     extends Runnable {
 
     val taskId = taskDescription.taskId
@@ -377,6 +385,11 @@ private[spark] class Executor(
           taskDescription.serializedTask, Thread.currentThread.getContextClassLoader)
         task.localProperties = taskDescription.properties
         task.setTaskMemoryManager(taskMemoryManager)
+
+        // OPS
+        if(isOpsMaster) {
+          task.setIsOpsMaster()
+        }
 
         // If this task has been killed before we deserialized it, let's quit now. Otherwise,
         // continue executing the task.

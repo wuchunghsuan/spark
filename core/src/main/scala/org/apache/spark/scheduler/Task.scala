@@ -68,6 +68,12 @@ private[spark] abstract class Task[T](
   @transient lazy val metrics: TaskMetrics =
     SparkEnv.get.closureSerializer.newInstance().deserialize(ByteBuffer.wrap(serializedTaskMetrics))
 
+  // OPS
+  protected var isOpsMaster: Boolean = false
+  def setIsOpsMaster() {
+    this.isOpsMaster = true
+  }
+
   /**
    * Called by [[org.apache.spark.executor.Executor]] to run this task.
    *
