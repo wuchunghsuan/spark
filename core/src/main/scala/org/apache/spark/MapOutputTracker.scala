@@ -36,6 +36,7 @@ import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.shuffle.MetadataFetchFailedException
 import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockId}
 import org.apache.spark.util._
+import scala.collection.mutable
 
 /**
  * Helper class used by the [[MapOutputTrackerMaster]] to perform bookkeeping for a single
@@ -285,6 +286,10 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
       : Iterator[(BlockManagerId, Seq[(BlockId, Long)])] = {
     getMapSizesByExecutorId(shuffleId, reduceId, reduceId + 1)
   }
+
+  // For OPS
+  def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean
+  def getLocalStatuses(shuffleId: Int, executorId: String): Array[MapStatus]
 
   /**
    * Called from executors to get the server URIs and output sizes for each shuffle block that
@@ -658,6 +663,17 @@ private[spark] class MapOutputTrackerMaster(
         Iterator.empty
     }
   }
+  
+  // For OPS
+  def getLocalStatuses(shuffleId: Int, executorId: String): Array[MapStatus] = {
+    println("I am tracker master, getLocalStatuses!")
+    return null
+  }
+
+  def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean = synchronized {
+    println("I am tracker master, registerLocalMapOutput!")
+    return false
+  }
 
   override def stop() {
     mapOutputRequests.offer(PoisonPill)
@@ -678,6 +694,9 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
 
   val mapStatuses: Map[Int, Array[MapStatus]] =
     new ConcurrentHashMap[Int, Array[MapStatus]]().asScala
+
+  // For OPS
+  val localMapStatuses = new ConcurrentHashMap[Int, mutable.ArrayBuffer[MapStatus]]().asScala
 
   /** Remembers which map output locations are currently being fetched on an executor. */
   private val fetching = new HashSet[Int]
@@ -757,6 +776,23 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
     } else {
       statuses
     }
+  }
+
+  // For OPS
+  def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean = synchronized {
+    if (!localMapStatuses.contains(shuffleId)) {
+      localMapStatuses(shuffleId) = new mutable.ArrayBuffer[MapStatus]()
+      localMapStatuses(shuffleId) += status
+      return true
+    }
+    localMapStatuses(shuffleId) += status
+    return false
+  }
+
+  def getLocalStatuses(shuffleId: Int, executorId: String): Array[MapStatus] = {
+    val statuses = this.localMapStatuses(shuffleId).toArray
+    println("Get local statuses, size: " + statuses.length)
+    return statuses
   }
 
 

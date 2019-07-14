@@ -79,9 +79,6 @@ private[spark] class ShuffleMapTask(
 
   override def runTask(context: TaskContext): MapStatus = {
     // OPS log
-    if (this.isOpsMaster) {
-      println("OpsMaster Here!")
-    }
     val start = System.currentTimeMillis()
     // context.taskMetrics().setOpsMapStart(start)
 
@@ -104,12 +101,30 @@ private[spark] class ShuffleMapTask(
       val manager = SparkEnv.get.shuffleManager
       writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
       // OPS log
+      // println("ShuffleId: " + dep.shuffleHandle.shuffleId)
       println(dep.shuffleHandle.toString())
       val start = System.currentTimeMillis()
       
       writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
-      val ret = writer.stop(success = true).get
+      val mapStatus = writer.stop(success = true).get
 
+      // OPS
+      val mapOutputTracker = SparkEnv.get.mapOutputTracker
+      val isOpsMaster = mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, mapStatus)
+
+      if (isOpsMaster) {
+        println("OpsMaster Here!")
+        var i = 0
+        for (i <- 1 to 10) {
+          val statuses = mapOutputTracker.getLocalStatuses(dep.shuffleHandle.shuffleId, SparkEnv.get.executorId)
+          if (statuses == null) {
+            println(i.toString + "-statuses: Null")
+          } else {
+            println(i.toString + "-statuses: " + statuses.mkString(", "))
+          }
+          Thread.sleep(5000)
+        }
+      }
       // OPS log
       val stop = System.currentTimeMillis()
       println("[OPS]-Map-" + stageId.toString()
@@ -128,7 +143,7 @@ private[spark] class ShuffleMapTask(
           + "-" + context.taskMetrics().diskBytesSpilled.toString()
           + "-" + context.taskMetrics().opsSpillNum.toString()
           )
-      return ret
+      return mapStatus
     } catch {
       case e: Exception =>
         try {
