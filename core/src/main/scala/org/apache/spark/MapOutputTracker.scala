@@ -213,9 +213,11 @@ private class ShuffleStatus(numPartitions: Int) {
 private[spark] sealed trait MapOutputTrackerMessage
 private[spark] case class GetMapOutputStatuses(shuffleId: Int)
   extends MapOutputTrackerMessage
+private[spark] case class SyncSize(shuffleId: Int, executorId: String, localSize: Int) extends MapOutputTrackerMessage
 private[spark] case object StopMapOutputTracker extends MapOutputTrackerMessage
 
 private[spark] case class GetMapOutputMessage(shuffleId: Int, context: RpcCallContext)
+private[spark] case class SyncSizeMessage(shuffleId: Int, executorId: String, localSize: Int, context: RpcCallContext)
 
 /** RpcEndpoint class for MapOutputTrackerMaster */
 private[spark] class MapOutputTrackerMasterEndpoint(
@@ -229,6 +231,11 @@ private[spark] class MapOutputTrackerMasterEndpoint(
       val hostPort = context.senderAddress.hostPort
       logInfo("Asked to send map output locations for shuffle " + shuffleId + " to " + hostPort)
       val mapOutputStatuses = tracker.post(new GetMapOutputMessage(shuffleId, context))
+
+    case SyncSize(shuffleId: Int, executorId: String, localSize: Int) =>
+      val hostPort = context.senderAddress.hostPort
+      // println("Sync map size for shuffle " + shuffleId + " to " + hostPort)
+      val totalSize = tracker.post(new SyncSizeMessage(shuffleId, executorId, localSize, context))
 
     case StopMapOutputTracker =>
       logInfo("MapOutputTrackerMasterEndpoint stopped!")
@@ -290,6 +297,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
   // For OPS
   def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean
   def getLocalStatuses(shuffleId: Int, executorId: String): Array[MapStatus]
+  def syncMapSize(shuffleId: Int, executorId: String): Int
 
   /**
    * Called from executors to get the server URIs and output sizes for each shuffle block that
@@ -355,6 +363,10 @@ private[spark] class MapOutputTrackerMaster(
   // requests for map output statuses
   private val mapOutputRequests = new LinkedBlockingQueue[GetMapOutputMessage]
 
+  // For OPS
+  private val syncSizeRequests = new LinkedBlockingQueue[SyncSizeMessage]
+  private val mapsNumMap = new ConcurrentHashMap[Int, Map[String, Int]]().asScala
+
   // Thread pool used for handling map output status requests. This is a separate thread pool
   // to ensure we don't block the normal dispatcher threads.
   private val threadpool: ThreadPoolExecutor = {
@@ -363,6 +375,12 @@ private[spark] class MapOutputTrackerMaster(
     for (i <- 0 until numThreads) {
       pool.execute(new MessageLoop)
     }
+    pool
+  }
+
+  private val opsThreadpool: ThreadPoolExecutor = {
+    val pool = ThreadUtils.newDaemonFixedThreadPool(1, "ops-dispatcher")
+    pool.execute(new OpsMessageLoop)
     pool
   }
 
@@ -378,6 +396,10 @@ private[spark] class MapOutputTrackerMaster(
 
   def post(message: GetMapOutputMessage): Unit = {
     mapOutputRequests.offer(message)
+  }
+
+  def post(message: SyncSizeMessage): Unit = {
+    syncSizeRequests.offer(message)
   }
 
   /** Message loop used for dispatching messages. */
@@ -400,6 +422,39 @@ private[spark] class MapOutputTrackerMaster(
             val shuffleStatus = shuffleStatuses.get(shuffleId).head
             context.reply(
               shuffleStatus.serializedMapStatus(broadcastManager, isLocal, minSizeForBroadcast))
+          } catch {
+            case NonFatal(e) => logError(e.getMessage, e)
+          }
+        }
+      } catch {
+        case ie: InterruptedException => // exit
+      }
+    }
+  }
+
+  private class OpsMessageLoop extends Runnable {
+    override def run(): Unit = {
+      try {
+        while (true) {
+          try {
+            val data = syncSizeRequests.take()
+            val context = data.context
+            val shuffleId = data.shuffleId
+            val executorId = data.executorId
+            val localSize = data.localSize
+            val hostPort = context.senderAddress.hostPort
+            println("Sync map size, shuffleId: " + shuffleId + ", executorId: " + executorId + ", localSize: " + localSize)
+            mapsNumMap.putIfAbsent(shuffleId, new ConcurrentHashMap[String, Int]().asScala)
+            val sizeMap = mapsNumMap(shuffleId)
+            sizeMap.put(executorId, localSize)
+            var totalSize = 0
+            for (value <- sizeMap.values) {
+              totalSize += value
+            }
+            // val bb = java.nio.ByteBuffer.allocate(4)
+            // bb.putInt(totalSize)
+            // context.reply(bb.array())
+            context.reply(totalSize)
           } catch {
             case NonFatal(e) => logError(e.getMessage, e)
           }
@@ -675,9 +730,15 @@ private[spark] class MapOutputTrackerMaster(
     return false
   }
 
+  def syncMapSize(shuffleId: Int, executorId: String): Int = {
+    println("I am tracker master, syncMapSize!")
+    return 0
+  }
+
   override def stop() {
     mapOutputRequests.offer(PoisonPill)
     threadpool.shutdown()
+    opsThreadpool.shutdown()
     sendTracker(StopMapOutputTracker)
     trackerEndpoint = null
     shuffleStatuses.clear()
@@ -795,6 +856,15 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
     return statuses
   }
 
+  // Sync size with master and return the total completed map size
+  def syncMapSize(shuffleId: Int, executorId: String): Int = {
+    val startTime = System.currentTimeMillis
+    val localSize = this.localMapStatuses(shuffleId).length
+    val totalSize = askTracker[Int](SyncSize(shuffleId, executorId, localSize))
+    println(s"Sync map output statuses for shuffle $shuffleId took " +
+        s"${System.currentTimeMillis - startTime} ms, totalSize: " + totalSize)
+    return totalSize
+  }
 
   /** Unregister shuffle data. */
   def unregisterShuffle(shuffleId: Int): Unit = {

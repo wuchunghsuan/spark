@@ -28,6 +28,7 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.shuffle.ShuffleWriter
+import org.apache.spark.shuffle.BaseShuffleHandle
 
 /**
  * A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
@@ -102,7 +103,6 @@ private[spark] class ShuffleMapTask(
       writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
       // OPS log
       // println("ShuffleId: " + dep.shuffleHandle.shuffleId)
-      println(dep.shuffleHandle.toString())
       val start = System.currentTimeMillis()
       
       writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
@@ -113,16 +113,14 @@ private[spark] class ShuffleMapTask(
       val isOpsMaster = mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, mapStatus)
 
       if (isOpsMaster) {
-        println("OpsMaster Here!")
-        var i = 0
-        for (i <- 1 to 10) {
+        println("ShuffleHandler: " + dep.shuffleHandle.toString())
+        var totalSize = 0
+        val numMaps = dep.shuffleHandle.asInstanceOf[BaseShuffleHandle[_, _, _]].numMaps
+        println("OpsMaster Here! numMaps: " + numMaps.toString())
+        while (totalSize != numMaps) {
           val statuses = mapOutputTracker.getLocalStatuses(dep.shuffleHandle.shuffleId, SparkEnv.get.executorId)
-          if (statuses == null) {
-            println(i.toString + "-statuses: Null")
-          } else {
-            println(i.toString + "-statuses: " + statuses.mkString(", "))
-          }
-          Thread.sleep(5000)
+          totalSize = mapOutputTracker.syncMapSize(dep.shuffleHandle.shuffleId, SparkEnv.get.executorId)
+          Thread.sleep(3000)
         }
       }
       // OPS log
