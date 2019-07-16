@@ -295,7 +295,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
   }
 
   // For OPS
-  def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean
+  def registerLocalMapOutput(shuffleId: Int, mapId: Int, status: MapStatus): Boolean
   def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])]
   def syncMapSize(shuffleId: Int, executorId: String): Int
 
@@ -480,6 +480,7 @@ private[spark] class MapOutputTrackerMaster(
   }
 
   def registerMapOutput(shuffleId: Int, mapId: Int, status: MapStatus) {
+    // println("registerMapOutput mapId: " + mapId.toString())
     shuffleStatuses(shuffleId).addMapOutput(mapId, status)
   }
 
@@ -725,7 +726,7 @@ private[spark] class MapOutputTrackerMaster(
     return null
   }
 
-  def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean = synchronized {
+  def registerLocalMapOutput(shuffleId: Int, mapId: Int, status: MapStatus): Boolean = synchronized {
     println("I am tracker master, registerLocalMapOutput!")
     return false
   }
@@ -757,7 +758,7 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
     new ConcurrentHashMap[Int, Array[MapStatus]]().asScala
 
   // For OPS
-  val localMapStatuses = new ConcurrentHashMap[Int, mutable.ArrayBuffer[MapStatus]]().asScala
+  val localMapStatuses = new ConcurrentHashMap[Int, mutable.ArrayBuffer[(Int,MapStatus)]]().asScala
 
   /** Remembers which map output locations are currently being fetched on an executor. */
   private val fetching = new HashSet[Int]
@@ -840,20 +841,20 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
   }
 
   // For OPS
-  def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean = synchronized {
+  def registerLocalMapOutput(shuffleId: Int, mapId: Int, status: MapStatus): Boolean = synchronized {
     if (!localMapStatuses.contains(shuffleId)) {
-      localMapStatuses(shuffleId) = new mutable.ArrayBuffer[MapStatus]()
-      localMapStatuses(shuffleId) += status
+      localMapStatuses(shuffleId) = new mutable.ArrayBuffer[(Int, MapStatus)]()
+      localMapStatuses(shuffleId) += new Tuple2[Int, MapStatus](mapId, status)
       return true
     }
-    localMapStatuses(shuffleId) += status
+    localMapStatuses(shuffleId) += new Tuple2[Int, MapStatus](mapId, status)
     return false
   }
 
   def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])] = {
     val statuses = this.localMapStatuses(shuffleId).toArray
     println("Get local statuses, size: " + statuses.length)
-    MapOutputTracker.convertMapStatuses(shuffleId, 0, 1, statuses)
+    MapOutputTracker.convertLocalMapStatuses(shuffleId, 0, 1, statuses)
   }
 
   // Sync size with master and return the total completed map size
@@ -982,6 +983,30 @@ private[spark] object MapOutputTracker extends Logging {
     assert (statuses != null)
     val splitsByAddress = new HashMap[BlockManagerId, ListBuffer[(BlockId, Long)]]
     for ((status, mapId) <- statuses.iterator.zipWithIndex) {
+      if (status == null) {
+        val errorMessage = s"Missing an output location for shuffle $shuffleId"
+        logError(errorMessage)
+        throw new MetadataFetchFailedException(shuffleId, startPartition, errorMessage)
+      } else {
+        for (part <- startPartition until endPartition) {
+          val size = status.getSizeForBlock(part)
+          if (size != 0) {
+            splitsByAddress.getOrElseUpdate(status.location, ListBuffer()) +=
+                ((ShuffleBlockId(shuffleId, mapId, part), size))
+          }
+        }
+      }
+    }
+    splitsByAddress.iterator
+  }
+  def convertLocalMapStatuses(
+      shuffleId: Int,
+      startPartition: Int,
+      endPartition: Int,
+      statuses: Array[(Int, MapStatus)]): Iterator[(BlockManagerId, Seq[(BlockId, Long)])] = {
+    assert (statuses != null)
+    val splitsByAddress = new HashMap[BlockManagerId, ListBuffer[(BlockId, Long)]]
+    for ((mapId, status) <- statuses) {
       if (status == null) {
         val errorMessage = s"Missing an output location for shuffle $shuffleId"
         logError(errorMessage)

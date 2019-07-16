@@ -107,14 +107,14 @@ private[spark] class ShuffleMapTask(
       var mapStatus = opsWriter.stop(success = true).get
 
       val mapOutputTracker = SparkEnv.get.mapOutputTracker
-      val isOpsMaster = mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, mapStatus)
+      val isOpsMaster = mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, context.partitionId(), mapStatus)
 
       if (isOpsMaster) {
         println("ShuffleHandler: " + dep.shuffleHandle.toString())
         var totalSize = 0
         val numMaps = dep.shuffleHandle.asInstanceOf[BaseShuffleHandle[_, _, _]].numMaps
 
-        println("OpsMaster Here! numMaps: " + numMaps.toString())
+        println("OpsMaster on task " + context.taskAttemptId().toString() + ". numMaps: " + numMaps.toString())
 
         while (totalSize != numMaps) {
           // val statuses = mapOutputTracker.getLocalStatuses(dep.shuffleHandle.shuffleId)
@@ -127,7 +127,7 @@ private[spark] class ShuffleMapTask(
         val records = new OpsShuffleReader(dep.shuffleHandle.asInstanceOf[BaseShuffleHandle[_, _, _]], 0, 1, context).read().asInstanceOf[Iterator[_ <: Product2[Any, Any]]]
         writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
         writer.write(records)
-        mapStatus = opsWriter.stop(success = true).get
+        mapStatus = writer.stop(success = true).get
       } else {
         // If not master, return empty mapStatus
         val lengths = new Array[Long](dep.partitioner.numPartitions)
