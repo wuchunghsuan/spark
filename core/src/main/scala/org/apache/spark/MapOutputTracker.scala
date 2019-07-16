@@ -296,7 +296,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
 
   // For OPS
   def registerLocalMapOutput(shuffleId: Int, status: MapStatus): Boolean
-  def getLocalStatuses(shuffleId: Int, executorId: String): Array[MapStatus]
+  def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])]
   def syncMapSize(shuffleId: Int, executorId: String): Int
 
   /**
@@ -720,7 +720,7 @@ private[spark] class MapOutputTrackerMaster(
   }
   
   // For OPS
-  def getLocalStatuses(shuffleId: Int, executorId: String): Array[MapStatus] = {
+  def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])] = {
     println("I am tracker master, getLocalStatuses!")
     return null
   }
@@ -850,10 +850,10 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
     return false
   }
 
-  def getLocalStatuses(shuffleId: Int, executorId: String): Array[MapStatus] = {
+  def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])] = {
     val statuses = this.localMapStatuses(shuffleId).toArray
     println("Get local statuses, size: " + statuses.length)
-    return statuses
+    MapOutputTracker.convertMapStatuses(shuffleId, 0, 1, statuses)
   }
 
   // Sync size with master and return the total completed map size

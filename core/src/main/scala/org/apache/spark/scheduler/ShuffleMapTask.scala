@@ -27,8 +27,7 @@ import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
-import org.apache.spark.shuffle.ShuffleWriter
-import org.apache.spark.shuffle.BaseShuffleHandle
+import org.apache.spark.shuffle.{ShuffleWriter, BaseShuffleHandle, OpsShuffleReader}
 
 /**
  * A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
@@ -98,17 +97,15 @@ private[spark] class ShuffleMapTask(
     } else 0L
 
     var writer: ShuffleWriter[Any, Any] = null
+    var opsWriter: ShuffleWriter[Any, Any] = null
     try {
       val manager = SparkEnv.get.shuffleManager
-      writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
-      // OPS log
-      // println("ShuffleId: " + dep.shuffleHandle.shuffleId)
+      opsWriter = manager.getOpsWriter[Any, Any](dep.shuffleHandle, partitionId, context)
       val start = System.currentTimeMillis()
       
-      writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
-      val mapStatus = writer.stop(success = true).get
+      opsWriter.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
+      var mapStatus = opsWriter.stop(success = true).get
 
-      // OPS
       val mapOutputTracker = SparkEnv.get.mapOutputTracker
       val isOpsMaster = mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, mapStatus)
 
@@ -116,14 +113,27 @@ private[spark] class ShuffleMapTask(
         println("ShuffleHandler: " + dep.shuffleHandle.toString())
         var totalSize = 0
         val numMaps = dep.shuffleHandle.asInstanceOf[BaseShuffleHandle[_, _, _]].numMaps
+
         println("OpsMaster Here! numMaps: " + numMaps.toString())
+
         while (totalSize != numMaps) {
-          val statuses = mapOutputTracker.getLocalStatuses(dep.shuffleHandle.shuffleId, SparkEnv.get.executorId)
+          // val statuses = mapOutputTracker.getLocalStatuses(dep.shuffleHandle.shuffleId)
           totalSize = mapOutputTracker.syncMapSize(dep.shuffleHandle.shuffleId, SparkEnv.get.executorId)
           Thread.sleep(3000)
         }
+
+        println("OpsMaster starts pre-merge.")
+
+        val records = new OpsShuffleReader(dep.shuffleHandle.asInstanceOf[BaseShuffleHandle[_, _, _]], 0, 1, context).read().asInstanceOf[Iterator[_ <: Product2[Any, Any]]]
+        writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
+        writer.write(records)
+        mapStatus = opsWriter.stop(success = true).get
+      } else {
+        // If not master, return empty mapStatus
+        val lengths = new Array[Long](dep.partitioner.numPartitions)
+        mapStatus = MapStatus.apply(SparkEnv.get.blockManager.shuffleServerId, lengths)
       }
-      // OPS log
+
       val stop = System.currentTimeMillis()
       println("[OPS]-Map-" + stageId.toString()
           + "-" + appId.get

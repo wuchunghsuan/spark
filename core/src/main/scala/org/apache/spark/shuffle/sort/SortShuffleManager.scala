@@ -150,6 +150,27 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
     }
   }
 
+  override def getOpsWriter[K, V](
+      handle: ShuffleHandle,
+      mapId: Int,
+      context: TaskContext): ShuffleWriter[K, V] = {
+    numMapsForShuffle.putIfAbsent(
+      handle.shuffleId, handle.asInstanceOf[BaseShuffleHandle[_, _, _]].numMaps)
+    val env = SparkEnv.get
+    handle match {
+      case bypassMergeSortHandle: BypassMergeSortShuffleHandle[K @unchecked, V @unchecked] =>
+      new OpsShuffleWriter(
+        env.blockManager,
+        shuffleBlockResolver.asInstanceOf[IndexShuffleBlockResolver],
+        bypassMergeSortHandle,
+        mapId,
+        context,
+        env.conf)
+      case other: BaseShuffleHandle[K @unchecked, V @unchecked, _] =>
+        new SortShuffleWriter(shuffleBlockResolver, other, mapId, context)
+    }
+  }
+
   /** Remove a shuffle's metadata from the ShuffleManager. */
   override def unregisterShuffle(shuffleId: Int): Boolean = {
     Option(numMapsForShuffle.remove(shuffleId)).foreach { numMaps =>
