@@ -19,6 +19,9 @@ package org.apache.spark.unsafe.memory;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
+import java.util.LinkedList;
+
 import org.apache.spark.unsafe.Platform;
 
 /**
@@ -53,6 +56,8 @@ public class MemoryBlock extends MemoryLocation {
    * which lives in a different package.
    */
   public int pageNumber = NO_PAGE_NUMBER;
+
+  public List<OpsPointer> pointers = new LinkedList<>();
 
   public MemoryBlock(@Nullable Object obj, long offset, long length) {
     super(obj, offset);

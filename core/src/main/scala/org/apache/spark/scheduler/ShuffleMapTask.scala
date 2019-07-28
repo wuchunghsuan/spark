@@ -124,9 +124,8 @@ private[spark] class ShuffleMapTask(
 
         println("OpsMaster starts pre-merge.")
 
-        val records = new OpsShuffleReader(dep.shuffleHandle.asInstanceOf[BaseShuffleHandle[_, _, _]], 0, 1, context).read().asInstanceOf[Iterator[_ <: Product2[Any, Any]]]
-        writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
-        writer.write(records)
+        writer = manager.getOpsMasterWriter[Any, Any](dep.shuffleHandle, partitionId, context)
+        writer.write(null)
         mapStatus = writer.stop(success = true).get
       } else {
         // If not master, return empty mapStatus

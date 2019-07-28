@@ -115,7 +115,9 @@ private[spark] object SortShuffleWriter {
     if (dep.mapSideCombine) {
       false
     } else {
-      val bypassMergeThreshold: Int = conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
+      // val bypassMergeThreshold: Int = conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
+      // OPS: force to unable bypass
+      val bypassMergeThreshold: Int = 0
       dep.partitioner.numPartitions <= bypassMergeThreshold
     }
   }

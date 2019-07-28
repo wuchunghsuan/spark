@@ -27,6 +27,8 @@ import org.apache.spark.storage.memory.MemoryStore
 import org.apache.spark.unsafe.Platform
 import org.apache.spark.unsafe.array.ByteArrayMethods
 import org.apache.spark.unsafe.memory.MemoryAllocator
+import org.apache.spark.unsafe.memory.HeapMemoryAllocator
+import org.apache.spark.unsafe.memory.OpsSharedMemoryAllocator
 
 /**
  * An abstract memory manager that enforces how memory is shared between execution and storage.
@@ -196,6 +198,7 @@ private[spark] abstract class MemoryManager(
    */
   final val tungstenMemoryMode: MemoryMode = {
     if (conf.get(MEMORY_OFFHEAP_ENABLED)) {
+      println("Off-heap mode used")
       require(conf.get(MEMORY_OFFHEAP_SIZE) > 0,
         "spark.memory.offHeap.size must be > 0 when spark.memory.offHeap.enabled == true")
       require(Platform.unaligned(),
@@ -231,10 +234,11 @@ private[spark] abstract class MemoryManager(
   /**
    * Allocates memory for use by Unsafe/Tungsten code.
    */
-  private[memory] final val tungstenMemoryAllocator: MemoryAllocator = {
-    tungstenMemoryMode match {
-      case MemoryMode.ON_HEAP => MemoryAllocator.HEAP
-      case MemoryMode.OFF_HEAP => MemoryAllocator.UNSAFE
-    }
-  }
+  private[memory] final val tungstenMemoryAllocator: MemoryAllocator = new OpsSharedMemoryAllocator()
+  // private[memory] final val tungstenMemoryAllocator: MemoryAllocator = {
+  //   tungstenMemoryMode match {
+  //     case MemoryMode.ON_HEAP => MemoryAllocator.HEAP
+  //     case MemoryMode.OFF_HEAP => MemoryAllocator.UNSAFE
+  //   }
+  // }
 }

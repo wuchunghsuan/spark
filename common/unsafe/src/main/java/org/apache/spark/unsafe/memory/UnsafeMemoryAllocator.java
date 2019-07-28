@@ -17,6 +17,8 @@
 
 package org.apache.spark.unsafe.memory;
 
+import java.util.List;
+
 import org.apache.spark.unsafe.Platform;
 
 /**
@@ -53,5 +55,10 @@ public class UnsafeMemoryAllocator implements MemoryAllocator {
     memory.offset = 0;
     // Mark the page as freed (so we can detect double-frees).
     memory.pageNumber = MemoryBlock.FREED_IN_ALLOCATOR_PAGE_NUMBER;
+  }
+
+  @Override
+  public List<MemoryBlock> getSharedPages() {
+    return null;
   }
 }

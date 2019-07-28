@@ -17,6 +17,8 @@
 
 package org.apache.spark.unsafe.memory;
 
+import java.util.List;
+
 public interface MemoryAllocator {
 
   /**
@@ -41,4 +43,7 @@ public interface MemoryAllocator {
   MemoryAllocator UNSAFE = new UnsafeMemoryAllocator();
 
   MemoryAllocator HEAP = new HeapMemoryAllocator();
+
+  // For OPS shared memory
+  List<MemoryBlock> getSharedPages();
 }

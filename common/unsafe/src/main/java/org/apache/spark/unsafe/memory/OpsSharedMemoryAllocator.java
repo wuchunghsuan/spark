@@ -23,13 +23,16 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.BitSet;
 
 import org.apache.spark.unsafe.Platform;
 
 /**
- * A simple {@link MemoryAllocator} that can allocate up to 16GB using a JVM long primitive array.
+ * Shared memory allocator for OPS.
  */
-public class HeapMemoryAllocator implements MemoryAllocator {
+public class OpsSharedMemoryAllocator implements MemoryAllocator {
+
+  private final List<MemoryBlock> pageList = new LinkedList<>();
 
   @GuardedBy("this")
   private final Map<Long, LinkedList<WeakReference<long[]>>> bufferPoolsBySize = new HashMap<>();
@@ -63,6 +66,8 @@ public class HeapMemoryAllocator implements MemoryAllocator {
               if (MemoryAllocator.MEMORY_DEBUG_FILL_ENABLED) {
                 memory.fill(MemoryAllocator.MEMORY_DEBUG_FILL_CLEAN_VALUE);
               }
+              System.out.println("Use pool page.");
+              this.pageList.add(memory);
               return memory;
             }
           }
@@ -75,6 +80,7 @@ public class HeapMemoryAllocator implements MemoryAllocator {
     if (MemoryAllocator.MEMORY_DEBUG_FILL_ENABLED) {
       memory.fill(MemoryAllocator.MEMORY_DEBUG_FILL_CLEAN_VALUE);
     }
+    this.pageList.add(memory);
     return memory;
   }
 
@@ -119,6 +125,6 @@ public class HeapMemoryAllocator implements MemoryAllocator {
 
   @Override
   public List<MemoryBlock> getSharedPages() {
-    return null;
+    return this.pageList;
   }
 }

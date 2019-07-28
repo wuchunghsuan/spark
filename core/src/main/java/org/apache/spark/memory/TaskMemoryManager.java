@@ -32,7 +32,9 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.spark.unsafe.UnsafeAlignedOffset;
 import org.apache.spark.unsafe.memory.MemoryBlock;
+import org.apache.spark.unsafe.memory.OpsPointer;
 import org.apache.spark.util.Utils;
 
 /**
@@ -435,7 +437,8 @@ public class TaskMemoryManager {
         if (page != null) {
           logger.debug("unreleased page: " + page + " in task " + taskAttemptId);
           page.pageNumber = MemoryBlock.FREED_IN_TMM_PAGE_NUMBER;
-          memoryManager.tungstenMemoryAllocator().free(page);
+          // OPS: do not free pages
+          // memoryManager.tungstenMemoryAllocator().free(page);
         }
       }
       Arrays.fill(pageTable, null);
@@ -459,5 +462,31 @@ public class TaskMemoryManager {
    */
   public MemoryMode getTungstenMemoryMode() {
     return tungstenMemoryMode;
+  }
+
+  // For OPS test
+  public void testSharedPages() {
+    List<MemoryBlock> sharedPages = memoryManager.tungstenMemoryAllocator().getSharedPages();
+    System.out.println("Test shared pages. Size " + sharedPages.size());
+    int i = 0;
+    for (MemoryBlock page : sharedPages) {
+      System.out.println("Page " + i + " pointers length: " + page.pointers.size());
+      String test = "";
+      // for (OpsPointer pointer : page.pointers) {
+      //   test += pointer.toString() + ", ";
+      // }
+      // System.out.println("Page " + i + " pointers: {" + test + "}");
+      // final int uaoSize = UnsafeAlignedOffset.getUaoSize();
+      // final Object recordPage = page.getBaseObject();
+      // final long recordOffsetInPage = page.getBaseOffset();
+      // int dataRemaining = UnsafeAlignedOffset.getSize(recordPage, recordOffsetInPage);
+      // System.out.println("Page " + i + " first record length: " + dataRemaining);
+      // System.out.println("Page " + i + " size: " + page.size() + " baseOffset: " + page.getBaseOffset());
+      i++;
+    }
+  }
+
+  public List<MemoryBlock> getSharedPages() {
+    return memoryManager.tungstenMemoryAllocator().getSharedPages();
   }
 }
