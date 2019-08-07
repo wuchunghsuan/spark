@@ -149,6 +149,9 @@ final class OpsSharedManager extends MemoryConsumer {
    * Force all memory and spill files to be deleted; called by shuffle error-handling code.
    */
   public void cleanupResources() { 
+    if (currentPage != null) {
+      addSharedPage(currentPage.pageNumber);
+    }
     currentPage = null;
   }
 
@@ -161,27 +164,27 @@ final class OpsSharedManager extends MemoryConsumer {
    *                      that exceed the page size are handled via a different code path which uses
    *                      special overflow pages).
    */
-  private boolean acquireNewPageIfNecessary(int required) {
+  private void acquireNewPageIfNecessary(int required) {
     if (currentPage == null ||
       pageCursor + required > currentPage.getBaseOffset() + currentPage.size() ) {
-        // TODO: try to find space in previous pages
-        currentPage = null;
-        while (currentPage == null) {
-          try {
-            currentPage = allocateSharedPage(required);
-            if (currentPage == null) {
-              // sleep, wait for retry
-              Thread.sleep(1000);
-              continue;
-            }
-            pageCursor = currentPage.getBaseOffset();
-          } catch (InterruptedException e) {
-            e.printStackTrace();
+      if (currentPage != null) {
+        addSharedPage(currentPage.pageNumber);
+      }
+      currentPage = null;
+      while (currentPage == null) {
+        try {
+          currentPage = allocateSharedPage(required);
+          if (currentPage == null) {
+            // sleep, wait for retry
+            Thread.sleep(1000);
+            continue;
           }
+          pageCursor = currentPage.getBaseOffset();
+        } catch (InterruptedException e) {
+          e.printStackTrace();
         }
-      return true;
+      }
     }
-    return false;
   }
 
   /**
@@ -192,7 +195,7 @@ final class OpsSharedManager extends MemoryConsumer {
     final int uaoSize = UnsafeAlignedOffset.getUaoSize();
     // Need 4 or 8 bytes to store the record length.
     final int required = length + uaoSize;
-    boolean isFirst = acquireNewPageIfNecessary(required);
+    acquireNewPageIfNecessary(required);
 
     assert(currentPage != null);
     final Object base = currentPage.getBaseObject();

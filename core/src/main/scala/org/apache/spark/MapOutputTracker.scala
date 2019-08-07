@@ -295,6 +295,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
   }
 
   // For OPS
+  def isMaster(): Boolean
   def registerLocalMapOutput(shuffleId: Int, mapId: Int, status: MapStatus): Boolean
   def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])]
   def syncMapSize(shuffleId: Int, executorId: String): Int
@@ -730,6 +731,10 @@ private[spark] class MapOutputTrackerMaster(
     return false
   }
 
+  def isMaster(): Boolean = {
+    return false
+  }
+
   def syncMapSize(shuffleId: Int, executorId: String): Int = {
     println("I am tracker master, syncMapSize!")
     return 0
@@ -758,6 +763,8 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
 
   // For OPS
   val localMapStatuses = new ConcurrentHashMap[Int, mutable.ArrayBuffer[(Int,MapStatus)]]().asScala
+
+  var isFirst = true
 
   /** Remembers which map output locations are currently being fetched on an executor. */
   private val fetching = new HashSet[Int]
@@ -847,6 +854,14 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
       return true
     }
     localMapStatuses(shuffleId) += new Tuple2[Int, MapStatus](mapId, status)
+    return false
+  }
+
+  def isMaster(): Boolean = synchronized {
+    if (isFirst) {
+      isFirst = false
+      return true
+    }
     return false
   }
 

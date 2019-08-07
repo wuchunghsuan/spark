@@ -227,28 +227,9 @@ public class OpsSharedShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     // updatePeakMemoryUsed();
     serBuffer = null;
     serOutputStream = null;
-    sorter = null;
+    // sorter = null;
     final long[] partitionLengths = new long[1];
     partitionLengths[0] = 0;
-    // final SpillInfo[] spills = sorter.closeAndGetSpills();
-    // final File output = shuffleBlockResolver.getDataFile(shuffleId, mapId);
-    // final File tmp = Utils.tempFileWith(output);
-    // try {
-    //   try {
-    //     partitionLengths = mergeSpills(spills, tmp);
-    //   } finally {
-    //     for (SpillInfo spill : spills) {
-    //       if (spill.file.exists() && ! spill.file.delete()) {
-    //         logger.error("Error while deleting spill file {}", spill.file.getPath());
-    //       }
-    //     }
-    //   }
-    //   shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, tmp);
-    // } finally {
-    //   if (tmp.exists() && !tmp.delete()) {
-    //     logger.error("Error while deleting temp file {}", tmp.getAbsolutePath());
-    //   }
-    // }
     mapStatus = MapStatus$.MODULE$.apply(blockManager.shuffleServerId(), partitionLengths);
   }
 

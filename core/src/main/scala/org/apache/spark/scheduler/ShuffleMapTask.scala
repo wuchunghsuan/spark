@@ -99,17 +99,28 @@ private[spark] class ShuffleMapTask(
     var writer: ShuffleWriter[Any, Any] = null
     var opsWriter: ShuffleWriter[Any, Any] = null
     try {
-      val manager = SparkEnv.get.shuffleManager
-      opsWriter = manager.getOpsWriter[Any, Any](dep.shuffleHandle, partitionId, context)
-      val start = System.currentTimeMillis()
-      
-      opsWriter.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
-      var mapStatus = opsWriter.stop(success = true).get
-
       val mapOutputTracker = SparkEnv.get.mapOutputTracker
-      val isOpsMaster = mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, context.partitionId(), mapStatus)
+      val manager = SparkEnv.get.shuffleManager
+      
+      val isOpsMaster = mapOutputTracker.isMaster()
 
-      if (isOpsMaster) {
+      val lengths = new Array[Long](dep.partitioner.numPartitions)
+      var mapStatus = MapStatus.apply(SparkEnv.get.blockManager.shuffleServerId, lengths)
+
+      if (!isOpsMaster) {
+        opsWriter = manager.getOpsWriter[Any, Any](dep.shuffleHandle, partitionId, context)
+        val start = System.currentTimeMillis()
+        
+        opsWriter.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
+        var mapStatus = opsWriter.stop(success = true).get
+
+        mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, context.partitionId(), mapStatus)
+
+      } else {
+
+        // Note: skip map computing in ops master.
+        mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, context.partitionId(), mapStatus)
+
         println("ShuffleHandler: " + dep.shuffleHandle.toString())
         var totalSize = 0
         val numMaps = dep.shuffleHandle.asInstanceOf[BaseShuffleHandle[_, _, _]].numMaps
@@ -123,11 +134,6 @@ private[spark] class ShuffleMapTask(
         mapStatus = writer.stop(success = true).get
 
         context.taskMemoryManager().cleanUpAllSharedMemory()
-
-      } else {
-        // If not master, return empty mapStatus
-        val lengths = new Array[Long](dep.partitioner.numPartitions)
-        mapStatus = MapStatus.apply(SparkEnv.get.blockManager.shuffleServerId, lengths)
       }
 
       val stop = System.currentTimeMillis()

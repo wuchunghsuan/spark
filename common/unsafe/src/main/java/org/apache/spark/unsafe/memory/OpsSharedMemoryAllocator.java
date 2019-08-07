@@ -38,11 +38,13 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
   private BitSet allocatedPages = new BitSet(PAGE_TABLE_SIZE);
   private List<Integer> pageNumList = new LinkedList<>();
   private long usedMemory = 0;
+  private int usedPages = 0;
+  private int totalPages = 0;
   // private static final long MEMORY_LIMIT = 12000;
   private long MEMORY_LIMIT = 12000;
 
   public OpsSharedMemoryAllocator(long limit) {
-    this.MEMORY_LIMIT = Math.round(limit);
+    this.MEMORY_LIMIT = limit;
     System.out.println("OpsSharedMemoryAllocator memory limit: " + this.MEMORY_LIMIT);
   }
 
@@ -92,11 +94,12 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
                 this.allocatedPages.set(pageNumber);
                 memory.pageNumber = pageNumber;
                 this.pageTable[pageNumber] = memory;
-                this.pageNumList.add(pageNumber);
 
                 this.usedMemory += size;
+                this.totalPages += 1;
+                this.usedPages += 1;
               }
-              System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000);
+              System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
               return memory;
             }
           }
@@ -119,11 +122,12 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
       this.allocatedPages.set(pageNumber);
       memory.pageNumber = pageNumber;
       this.pageTable[pageNumber] = memory;
-      this.pageNumList.add(pageNumber);
 
       this.usedMemory += size;
+      this.totalPages += 1;
+      this.usedPages += 1;
     }
-    System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000);
+    System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
     return memory;
   }
 
@@ -134,14 +138,18 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     assert (memory.pageNumber != MemoryBlock.FREED_IN_ALLOCATOR_PAGE_NUMBER) :
       "page has already been freed";
 
-    System.out.println(System.currentTimeMillis()/1000 + ": Free page " + memory.pageNumber + ", used: " + this.usedMemory/1000000);
+    System.out.println(System.currentTimeMillis()/1000 + ": Free page " + memory.pageNumber + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
+    
+    final long size = memory.size();
     synchronized (this) {
       this.pageTable[memory.pageNumber] = null;
       allocatedPages.clear(memory.pageNumber);
+
+      this.usedMemory -= size;
+      this.usedPages -= 1;
     }
     memory.pointers = null;
 
-    final long size = memory.size();
     if (MemoryAllocator.MEMORY_DEBUG_FILL_ENABLED) {
       memory.fill(MemoryAllocator.MEMORY_DEBUG_FILL_FREED_VALUE);
     }
@@ -153,8 +161,6 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     // MemoryBlock to null out its reference to the long[] array.
     long[] array = (long[]) memory.obj;
     memory.setObjAndOffset(null, 0);
-
-    this.usedMemory -= size;
 
     long alignedSize = ((size + 7) / 8) * 8;
     if (shouldPool(alignedSize)) {
@@ -177,11 +183,22 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     this.allocatedPages = null;
     this.pageNumList = null;
     this.usedMemory = 0;
+    this.usedPages = 0;
+    this.totalPages = 0;
   }
 
+  @Override
+  public void addSharedPage(int pageNumber) {
+    synchronized(this) {
+      this.pageNumList.add(pageNumber);
+    }
+  }
 
   @Override
   public List<MemoryBlock> getSharedPages() {
+    if (this.pageNumList.size() == 0) {
+      return new LinkedList<>();
+    }
     List<MemoryBlock> pages = new LinkedList<>();
     synchronized(this) {
       for (int index : this.pageNumList) {

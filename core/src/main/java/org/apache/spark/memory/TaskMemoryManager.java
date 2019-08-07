@@ -340,12 +340,12 @@ public class TaskMemoryManager {
       logger.warn("Failed to allocate a page ({} bytes), try again.", acquired);
       // there is no enough memory actually, it means the actual free memory is smaller than
       // MemoryManager thought, we should keep the acquired memory.
-      synchronized (this) {
-        acquiredButNotUsed += acquired;
-        // allocatedPages.clear(pageNumber);
-      }
-      // this could trigger spilling to free some pages.
-      return allocatePage(size, consumer);
+      // synchronized (this) {
+      //   acquiredButNotUsed += acquired;
+      //   // allocatedPages.clear(pageNumber);
+      // }
+      // // this could trigger spilling to free some pages.
+      // return allocatePage(size, consumer);
     }
     return page;
   }
@@ -536,5 +536,9 @@ public class TaskMemoryManager {
 
   public List<MemoryBlock> getSharedPages() {
     return memoryManager.tungstenMemoryAllocator().getSharedPages();
+  }
+
+  public void addSharedPage(int pageNumber) {
+    memoryManager.tungstenMemoryAllocator().addSharedPage(pageNumber);
   }
 }

@@ -64,4 +64,6 @@ public class UnsafeMemoryAllocator implements MemoryAllocator {
   public List<MemoryBlock> getSharedPages() {
     return null;
   }
+  @Override
+  public void addSharedPage(int pageNumber) { }
 }

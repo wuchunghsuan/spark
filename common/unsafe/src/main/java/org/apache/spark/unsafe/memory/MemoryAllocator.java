@@ -46,6 +46,7 @@ public interface MemoryAllocator {
 
   // For OPS shared memory
   List<MemoryBlock> getSharedPages();
+  void addSharedPage(int pageNumber);
 
   void cleanUpAllMemory();
 }

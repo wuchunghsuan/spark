@@ -130,6 +130,10 @@ public abstract class MemoryConsumer {
     return page;
   }
 
+  protected void addSharedPage(int pageNumber) {
+    taskMemoryManager.addSharedPage(pageNumber);
+  }
+
   /**
    * Free a memory block.
    */
