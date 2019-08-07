@@ -24,6 +24,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.BitSet;
+import java.util.Arrays;
 
 import org.apache.spark.unsafe.Platform;
 
@@ -32,7 +33,18 @@ import org.apache.spark.unsafe.Platform;
  */
 public class OpsSharedMemoryAllocator implements MemoryAllocator {
 
-  private final List<MemoryBlock> pageList = new LinkedList<>();
+  private static final int PAGE_TABLE_SIZE = 8192;
+  private MemoryBlock[] pageTable = new MemoryBlock[PAGE_TABLE_SIZE];
+  private BitSet allocatedPages = new BitSet(PAGE_TABLE_SIZE);
+  private List<Integer> pageNumList = new LinkedList<>();
+  private long usedMemory = 0;
+  // private static final long MEMORY_LIMIT = 12000;
+  private long MEMORY_LIMIT = 12000;
+
+  public OpsSharedMemoryAllocator(long limit) {
+    this.MEMORY_LIMIT = Math.round(limit);
+    System.out.println("OpsSharedMemoryAllocator memory limit: " + this.MEMORY_LIMIT);
+  }
 
   @GuardedBy("this")
   private final Map<Long, LinkedList<WeakReference<long[]>>> bufferPoolsBySize = new HashMap<>();
@@ -50,6 +62,10 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
 
   @Override
   public MemoryBlock allocate(long size) throws OutOfMemoryError {
+    if (size + this.usedMemory > MEMORY_LIMIT) {
+      System.out.println("Out of memory!");
+      return null;
+    }
     int numWords = (int) ((size + 7) / 8);
     long alignedSize = numWords * 8L;
     assert (alignedSize >= size);
@@ -66,8 +82,21 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
               if (MemoryAllocator.MEMORY_DEBUG_FILL_ENABLED) {
                 memory.fill(MemoryAllocator.MEMORY_DEBUG_FILL_CLEAN_VALUE);
               }
-              System.out.println("Use pool page.");
-              this.pageList.add(memory);
+              synchronized (this) {
+                int pageNumber = this.allocatedPages.nextClearBit(0);
+                if (pageNumber >= PAGE_TABLE_SIZE) {
+                  // releaseExecutionMemory(acquired, consumer);
+                  throw new IllegalStateException(
+                    "Have already allocated a maximum of " + PAGE_TABLE_SIZE + " pages");
+                }
+                this.allocatedPages.set(pageNumber);
+                memory.pageNumber = pageNumber;
+                this.pageTable[pageNumber] = memory;
+                this.pageNumList.add(pageNumber);
+
+                this.usedMemory += size;
+              }
+              System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000);
               return memory;
             }
           }
@@ -80,7 +109,21 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     if (MemoryAllocator.MEMORY_DEBUG_FILL_ENABLED) {
       memory.fill(MemoryAllocator.MEMORY_DEBUG_FILL_CLEAN_VALUE);
     }
-    this.pageList.add(memory);
+    synchronized (this) {
+      int pageNumber = this.allocatedPages.nextClearBit(0);
+      if (pageNumber >= PAGE_TABLE_SIZE) {
+        // releaseExecutionMemory(acquired, consumer);
+        throw new IllegalStateException(
+          "Have already allocated a maximum of " + PAGE_TABLE_SIZE + " pages");
+      }
+      this.allocatedPages.set(pageNumber);
+      memory.pageNumber = pageNumber;
+      this.pageTable[pageNumber] = memory;
+      this.pageNumList.add(pageNumber);
+
+      this.usedMemory += size;
+    }
+    System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000);
     return memory;
   }
 
@@ -90,10 +133,13 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
       "baseObject was null; are you trying to use the on-heap allocator to free off-heap memory?";
     assert (memory.pageNumber != MemoryBlock.FREED_IN_ALLOCATOR_PAGE_NUMBER) :
       "page has already been freed";
-    assert ((memory.pageNumber == MemoryBlock.NO_PAGE_NUMBER)
-            || (memory.pageNumber == MemoryBlock.FREED_IN_TMM_PAGE_NUMBER)) :
-      "TMM-allocated pages must first be freed via TMM.freePage(), not directly in allocator " +
-        "free()";
+
+    System.out.println(System.currentTimeMillis()/1000 + ": Free page " + memory.pageNumber + ", used: " + this.usedMemory/1000000);
+    synchronized (this) {
+      this.pageTable[memory.pageNumber] = null;
+      allocatedPages.clear(memory.pageNumber);
+    }
+    memory.pointers = null;
 
     final long size = memory.size();
     if (MemoryAllocator.MEMORY_DEBUG_FILL_ENABLED) {
@@ -107,6 +153,8 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     // MemoryBlock to null out its reference to the long[] array.
     long[] array = (long[]) memory.obj;
     memory.setObjAndOffset(null, 0);
+
+    this.usedMemory -= size;
 
     long alignedSize = ((size + 7) / 8) * 8;
     if (shouldPool(alignedSize)) {
@@ -124,7 +172,23 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
   }
 
   @Override
+  public void cleanUpAllMemory() {
+    this.pageTable = null;
+    this.allocatedPages = null;
+    this.pageNumList = null;
+    this.usedMemory = 0;
+  }
+
+
+  @Override
   public List<MemoryBlock> getSharedPages() {
-    return this.pageList;
+    List<MemoryBlock> pages = new LinkedList<>();
+    synchronized(this) {
+      for (int index : this.pageNumList) {
+        pages.add(this.pageTable[index]);
+      }
+      this.pageNumList.clear();
+    }
+    return pages;
   }
 }

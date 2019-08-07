@@ -54,6 +54,7 @@ import org.apache.spark.unsafe.memory.OpsPointer;
 import org.apache.spark.unsafe.UnsafeAlignedOffset;
 import org.apache.spark.unsafe.Platform;
 import org.apache.spark.util.Utils;
+import org.apache.spark.MapOutputTracker;
 
 /**
  * This class implements sort-based shuffle's hash-style shuffle fallback path. This write path
@@ -93,6 +94,10 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
   private final Serializer serializer;
   private final IndexShuffleBlockResolver shuffleBlockResolver;
 
+  private final MapOutputTracker mapOutputTracker;
+  private final String executorId;
+  private final int totalMapsNum;
+
   /** Array of file writers, one for each partition */
   private DiskBlockObjectWriter[] partitionWriters;
   private FileSegment[] partitionWriterSegments;
@@ -115,7 +120,10 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
       SerializedShuffleHandle<K, V> handle,
       int mapId,
       TaskContext taskContext,
-      SparkConf conf) {
+      SparkConf conf,
+      MapOutputTracker tracker,
+      String executorId,
+      int mapsNum) {
     // Use getSizeAsKb (not bytes) to maintain backwards compatibility if no units are provided
     this.fileBufferSize = (int) conf.getSizeAsKb("spark.shuffle.file.buffer", "32k") * 1024;
     this.transferToEnabled = conf.getBoolean("spark.file.transferTo", true);
@@ -130,6 +138,9 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     this.memoryManager = taskContext.taskMemoryManager();
     this.serializer = dep.serializer();
     this.shuffleBlockResolver = shuffleBlockResolver;
+    this.mapOutputTracker = tracker;
+    this.executorId = executorId;
+    this.totalMapsNum = mapsNum;
   }
 
   public void writePage(MemoryBlock page) {
@@ -155,6 +166,10 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     }
   }
 
+  private void freeSharedPage(MemoryBlock page) {
+    memoryManager.freeSharedPage(page);
+  }
+
   @Override
   public void write(Iterator<Product2<K, V>> records) throws IOException {
     assert (partitionWriters == null);
@@ -162,12 +177,6 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     Long start = System.currentTimeMillis();
     this.taskMetrics.setOpsSortStart(start);
 
-    // if (!records.hasNext()) {
-    //   partitionLengths = new long[numPartitions];
-    //   shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, null);
-    //   mapStatus = MapStatus$.MODULE$.apply(blockManager.shuffleServerId(), partitionLengths);
-    //   return;
-    // }
     final SerializerInstance serInstance = serializer.newInstance();
     final long openStartTime = System.nanoTime();
     partitionWriters = new DiskBlockObjectWriter[numPartitions];
@@ -185,15 +194,39 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     // included in the shuffle write time.
     writeMetrics.incWriteTime(System.nanoTime() - openStartTime);
 
-    // while (records.hasNext()) {
-    //   final Product2<K, V> record = records.next();
-    //   final K key = record._1();
-    //   partitionWriters[partitioner.getPartition(key)].write(key, record._2());
-    // }
-    memoryManager.testSharedPages();
-    for (MemoryBlock page : memoryManager.getSharedPages()) {
-      writePage(page);
+    int pageNum = 0;
+    boolean isLast = false;
+    while (true) {
+      // memoryManager.testSharedPages();
+      int completedMaps = this.mapOutputTracker.syncMapSize(this.shuffleId, this.executorId);
+      if (completedMaps >= this.totalMapsNum) {
+        System.out.println("The last time to getSharedPages, all maps done");
+        isLast = true;
+      }
+
+      List<MemoryBlock> pages = memoryManager.getSharedPages();
+      int pagesSize = pages.size();
+      System.out.println("Get shared pages size: " + pages.size() + ", time: " + System.currentTimeMillis()/1000);
+      pageNum += pages.size();
+      for (MemoryBlock page : pages) {
+        writePage(page);
+        freeSharedPage(page);
+      }
+      pages = null;
+      
+      if (isLast) {
+        break;
+      }
+      if (pagesSize == 0) {
+        try {
+          Thread.sleep(1000);
+        } catch (InterruptedException e) {
+          e.printStackTrace();
+        }
+        continue;
+      }
     }
+    System.out.println("Pre-merge total page num: " + pageNum);
 
     for (int i = 0; i < numPartitions; i++) {
       final DiskBlockObjectWriter writer = partitionWriters[i];

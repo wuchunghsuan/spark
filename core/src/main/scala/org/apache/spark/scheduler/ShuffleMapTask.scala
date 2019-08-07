@@ -27,7 +27,7 @@ import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
-import org.apache.spark.shuffle.{ShuffleWriter, BaseShuffleHandle, OpsShuffleReader}
+import org.apache.spark.shuffle.{ShuffleWriter, BaseShuffleHandle}
 
 /**
  * A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
@@ -116,17 +116,14 @@ private[spark] class ShuffleMapTask(
 
         println("OpsMaster on task " + context.taskAttemptId().toString() + ". numMaps: " + numMaps.toString())
 
-        while (totalSize != numMaps) {
-          // val statuses = mapOutputTracker.getLocalStatuses(dep.shuffleHandle.shuffleId)
-          totalSize = mapOutputTracker.syncMapSize(dep.shuffleHandle.shuffleId, SparkEnv.get.executorId)
-          Thread.sleep(3000)
-        }
-
         println("OpsMaster starts pre-merge.")
 
-        writer = manager.getOpsMasterWriter[Any, Any](dep.shuffleHandle, partitionId, context)
+        writer = manager.getOpsMasterWriter[Any, Any](dep.shuffleHandle, partitionId, context, mapOutputTracker, SparkEnv.get.executorId, numMaps)
         writer.write(null)
         mapStatus = writer.stop(success = true).get
+
+        context.taskMemoryManager().cleanUpAllSharedMemory()
+
       } else {
         // If not master, return empty mapStatus
         val lengths = new Array[Long](dep.partitioner.numPartitions)

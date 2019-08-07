@@ -321,6 +321,35 @@ public class TaskMemoryManager {
     return page;
   }
 
+  public MemoryBlock allocateSharedPage(long size, MemoryConsumer consumer) {
+    assert(consumer != null);
+    assert(consumer.getMode() == tungstenMemoryMode);
+    if (size > MAXIMUM_PAGE_SIZE_BYTES) {
+      throw new TooLargePageException(size);
+    }
+
+    long acquired = size;
+    // long acquired = acquireExecutionMemory(size, consumer);
+    if (acquired <= 0) {
+      return null;
+    }
+    MemoryBlock page = null;
+    try {
+      page = memoryManager.tungstenMemoryAllocator().allocate(acquired);
+    } catch (OutOfMemoryError e) {
+      logger.warn("Failed to allocate a page ({} bytes), try again.", acquired);
+      // there is no enough memory actually, it means the actual free memory is smaller than
+      // MemoryManager thought, we should keep the acquired memory.
+      synchronized (this) {
+        acquiredButNotUsed += acquired;
+        // allocatedPages.clear(pageNumber);
+      }
+      // this could trigger spilling to free some pages.
+      return allocatePage(size, consumer);
+    }
+    return page;
+  }
+
   /**
    * Free a block of memory allocated via {@link TaskMemoryManager#allocatePage}.
    */
@@ -346,6 +375,20 @@ public class TaskMemoryManager {
     page.pageNumber = MemoryBlock.FREED_IN_TMM_PAGE_NUMBER;
     memoryManager.tungstenMemoryAllocator().free(page);
     releaseExecutionMemory(pageSize, consumer);
+  }
+
+  public void freeSharedPage(MemoryBlock page) {
+    assert (page.pageNumber != MemoryBlock.NO_PAGE_NUMBER) :
+      "Called freePage() on memory that wasn't allocated with allocatePage()";
+    assert (page.pageNumber != MemoryBlock.FREED_IN_ALLOCATOR_PAGE_NUMBER) :
+      "Called freePage() on a memory block that has already been freed";
+    assert (page.pageNumber != MemoryBlock.FREED_IN_TMM_PAGE_NUMBER) :
+            "Called freePage() on a memory block that has already been freed";
+
+    long pageSize = page.size();
+    memoryManager.tungstenMemoryAllocator().free(page);
+    // releaseExecutionMemory(pageSize, consumer);
+    // memoryManager.releaseExecutionMemory(pageSize, taskAttemptId, tungstenMemoryMode);
   }
 
   /**
@@ -437,8 +480,7 @@ public class TaskMemoryManager {
         if (page != null) {
           logger.debug("unreleased page: " + page + " in task " + taskAttemptId);
           page.pageNumber = MemoryBlock.FREED_IN_TMM_PAGE_NUMBER;
-          // OPS: do not free pages
-          // memoryManager.tungstenMemoryAllocator().free(page);
+          memoryManager.tungstenMemoryAllocator().free(page);
         }
       }
       Arrays.fill(pageTable, null);
@@ -448,6 +490,12 @@ public class TaskMemoryManager {
     memoryManager.releaseExecutionMemory(acquiredButNotUsed, taskAttemptId, tungstenMemoryMode);
 
     return memoryManager.releaseAllExecutionMemoryForTask(taskAttemptId);
+  }
+
+  public void cleanUpAllSharedMemory() {
+    System.out.println("Clean up OPS shared memory.");
+    memoryManager.tungstenMemoryAllocator().cleanUpAllMemory();
+    memoryManager.cleanOpsAllocator();
   }
 
   /**

@@ -234,7 +234,13 @@ private[spark] abstract class MemoryManager(
   /**
    * Allocates memory for use by Unsafe/Tungsten code.
    */
-  private[memory] final val tungstenMemoryAllocator: MemoryAllocator = new OpsSharedMemoryAllocator()
+  private[memory] var tungstenMemoryAllocator: MemoryAllocator = new OpsSharedMemoryAllocator(onHeapExecutionMemory + onHeapStorageMemory)
+
+  private[memory] def cleanOpsAllocator() {
+    tungstenMemoryAllocator = null
+    System.gc()
+  }
+
   // private[memory] final val tungstenMemoryAllocator: MemoryAllocator = {
   //   tungstenMemoryMode match {
   //     case MemoryMode.ON_HEAP => MemoryAllocator.HEAP

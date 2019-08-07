@@ -58,6 +58,9 @@ public class UnsafeMemoryAllocator implements MemoryAllocator {
   }
 
   @Override
+  public void cleanUpAllMemory() { }
+
+  @Override
   public List<MemoryBlock> getSharedPages() {
     return null;
   }

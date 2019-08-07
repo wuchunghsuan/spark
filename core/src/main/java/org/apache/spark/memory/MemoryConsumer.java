@@ -122,6 +122,14 @@ public abstract class MemoryConsumer {
     return page;
   }
 
+  protected MemoryBlock allocateSharedPage(long required) {
+    MemoryBlock page = taskMemoryManager.allocateSharedPage(Math.max(pageSize, required), this);
+    if (page != null) {
+      used += page.size();
+    }
+    return page;
+  }
+
   /**
    * Free a memory block.
    */

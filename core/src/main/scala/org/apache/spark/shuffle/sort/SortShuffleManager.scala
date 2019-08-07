@@ -185,7 +185,10 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
   override def getOpsMasterWriter[K, V](
       handle: ShuffleHandle,
       mapId: Int,
-      context: TaskContext): ShuffleWriter[K, V] = {
+      context: TaskContext,
+      mapOutputTracker: MapOutputTracker,
+      executorId: String,
+      mapsNum: Int): ShuffleWriter[K, V] = {
     numMapsForShuffle.putIfAbsent(
       handle.shuffleId, handle.asInstanceOf[BaseShuffleHandle[_, _, _]].numMaps)
     val env = SparkEnv.get
@@ -197,7 +200,10 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
           unsafeShuffleHandle,
           mapId,
           context,
-          env.conf)
+          env.conf,
+          mapOutputTracker,
+          executorId,
+          mapsNum)
     }
   }
 

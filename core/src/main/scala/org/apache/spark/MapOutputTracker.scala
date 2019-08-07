@@ -443,7 +443,6 @@ private[spark] class MapOutputTrackerMaster(
             val executorId = data.executorId
             val localSize = data.localSize
             val hostPort = context.senderAddress.hostPort
-            println("Sync map size, shuffleId: " + shuffleId + ", executorId: " + executorId + ", localSize: " + localSize)
             mapsNumMap.putIfAbsent(shuffleId, new ConcurrentHashMap[String, Int]().asScala)
             val sizeMap = mapsNumMap(shuffleId)
             sizeMap.put(executorId, localSize)

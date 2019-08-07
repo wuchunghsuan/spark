@@ -131,9 +131,6 @@ final class OpsSharedManager extends MemoryConsumer {
     this.numElementsForSpillThreshold =
         (int) conf.get(package$.MODULE$.SHUFFLE_SPILL_NUM_ELEMENTS_FORCE_SPILL_THRESHOLD());
     this.writeMetrics = writeMetrics;
-    // this.inMemSorter = new ShuffleInMemorySorter(
-    //   this, initialSize, conf.getBoolean("spark.shuffle.sort.useRadixSort", true));
-    // this.peakMemoryUsedBytes = getMemoryUsage();
     this.diskWriteBufferSize =
         (int) (long) conf.get(package$.MODULE$.SHUFFLE_DISK_WRITE_BUFFER_SIZE());
   }
@@ -143,113 +140,17 @@ final class OpsSharedManager extends MemoryConsumer {
    */
   @Override
   public long spill(long size, MemoryConsumer trigger) throws IOException {
-    // if (trigger != this || inMemSorter == null || inMemSorter.numRecords() == 0) {
-    //   return 0L;
-    // }
-
-    // logger.info("Thread {} spilling sort data of {} to disk ({} {} so far)",
-    //   Thread.currentThread().getId(),
-    //   Utils.bytesToString(getMemoryUsage()),
-    //   spills.size(),
-    //   spills.size() > 1 ? " times" : " time");
-
-    // writeSortedFile(false);
-    // final long spillSize = freeMemory();
-    // inMemSorter.reset();
-    // // Reset the in-memory sorter's pointer array only after freeing up the memory pages holding the
-    // // records. Otherwise, if the task is over allocated memory, then without freeing the memory
-    // // pages, we might not be able to get memory for the pointer array.
-    // taskContext.taskMetrics().incMemoryBytesSpilled(spillSize);
-    // return spillSize;
     return 0;
   }
 
-  // private long getMemoryUsage() {
-  //   // long totalPageSize = 0;
-  //   // for (MemoryBlock page : allocatedPages) {
-  //   //   totalPageSize += page.size();
-  //   // }
-  //   // return ((inMemSorter == null) ? 0 : inMemSorter.getMemoryUsage()) + totalPageSize;
-  //   return 0;
-  // }
-
-  private void updatePeakMemoryUsed() {
-  //   long mem = getMemoryUsage();
-  //   if (mem > peakMemoryUsedBytes) {
-  //     peakMemoryUsedBytes = mem;
-  //   }
-  }
-
-  /**
-   * Return the peak memory used so far, in bytes.
-   */
-  // long getPeakMemoryUsedBytes() {
-  //   updatePeakMemoryUsed();
-  //   return peakMemoryUsedBytes;
-  // }
-
-  // private long freeMemory() {
-  //   updatePeakMemoryUsed();
-  //   long memoryFreed = 0;
-  //   for (MemoryBlock block : allocatedPages) {
-  //     memoryFreed += block.size();
-  //     freePage(block);
-  //   }
-  //   allocatedPages.clear();
-  //   currentPage = null;
-  //   pageCursor = 0;
-  //   return memoryFreed;
-  // }
+  private void updatePeakMemoryUsed() { }
 
   /**
    * Force all memory and spill files to be deleted; called by shuffle error-handling code.
    */
-  public void cleanupResources() {
-    // freeMemory();
-    // if (inMemSorter != null) {
-    //   inMemSorter.free();
-    //   inMemSorter = null;
-    // }
-    // for (SpillInfo spill : spills) {
-    //   if (spill.file.exists() && !spill.file.delete()) {
-    //     logger.error("Unable to delete spill file {}", spill.file.getPath());
-    //   }
-    // }
+  public void cleanupResources() { 
+    currentPage = null;
   }
-
-  /**
-   * Checks whether there is enough space to insert an additional record in to the sort pointer
-   * array and grows the array if additional space is required. If the required space cannot be
-   * obtained, then the in-memory data will be spilled to disk.
-   */
-  // private void growPointerArrayIfNecessary() throws IOException {
-  //   assert(inMemSorter != null);
-  //   if (!inMemSorter.hasSpaceForAnotherRecord()) {
-  //     long used = inMemSorter.getMemoryUsage();
-  //     LongArray array;
-  //     try {
-  //       // could trigger spilling
-  //       array = allocateArray(used / 8 * 2);
-  //     } catch (TooLargePageException e) {
-  //       // The pointer array is too big to fix in a single page, spill.
-  //       spill();
-  //       return;
-  //     } catch (SparkOutOfMemoryError e) {
-  //       // should have trigger spilling
-  //       if (!inMemSorter.hasSpaceForAnotherRecord()) {
-  //         logger.error("Unable to grow the pointer array");
-  //         throw e;
-  //       }
-  //       return;
-  //     }
-  //     // check if spilling is triggered or not
-  //     if (inMemSorter.hasSpaceForAnotherRecord()) {
-  //       freeArray(array);
-  //     } else {
-  //       inMemSorter.expandPointerArray(array);
-  //     }
-  //   }
-  // }
 
   /**
    * Allocates more memory in order to insert an additional record. This will request additional
@@ -264,10 +165,20 @@ final class OpsSharedManager extends MemoryConsumer {
     if (currentPage == null ||
       pageCursor + required > currentPage.getBaseOffset() + currentPage.size() ) {
         // TODO: try to find space in previous pages
-        currentPage = allocatePage(required);
-        pageCursor = currentPage.getBaseOffset();
-        System.out.println("OpsSharedManager: allocate new page!!! pageCursor: " + pageCursor);
-      // allocatedPages.add(currentPage);
+        currentPage = null;
+        while (currentPage == null) {
+          try {
+            currentPage = allocateSharedPage(required);
+            if (currentPage == null) {
+              // sleep, wait for retry
+              Thread.sleep(1000);
+              continue;
+            }
+            pageCursor = currentPage.getBaseOffset();
+          } catch (InterruptedException e) {
+            e.printStackTrace();
+          }
+        }
       return true;
     }
     return false;
@@ -278,16 +189,6 @@ final class OpsSharedManager extends MemoryConsumer {
    */
   public void insertRecord(Object recordBase, long recordOffset, int length, int partitionId)
     throws IOException {
-
-    // for tests
-    // assert(inMemSorter != null);
-    // if (inMemSorter.numRecords() >= numElementsForSpillThreshold) {
-    //   logger.info("Spilling data because number of spilledRecords crossed the threshold " +
-    //     numElementsForSpillThreshold);
-    //   spill();
-    // }
-
-    // growPointerArrayIfNecessary();
     final int uaoSize = UnsafeAlignedOffset.getUaoSize();
     // Need 4 or 8 bytes to store the record length.
     final int required = length + uaoSize;
@@ -295,39 +196,12 @@ final class OpsSharedManager extends MemoryConsumer {
 
     assert(currentPage != null);
     final Object base = currentPage.getBaseObject();
-    // final long recordAddress = taskMemoryManager.encodePageNumberAndOffset(currentPage, pageCursor);
 
     currentPage.pointers.add(new OpsPointer(pageCursor, partitionId));
-
     UnsafeAlignedOffset.putSize(base, pageCursor, length);
     // long tmp = pageCursor;
     pageCursor += uaoSize;
     Platform.copyMemory(recordBase, recordOffset, base, pageCursor, length);
     pageCursor += length;
-    if(isFirst) {
-      // System.out.println("putSize: " + length + "getSize: " + UnsafeAlignedOffset.getSize(base, tmp));
-      System.out.println("Add first record length: " + length + " size: " + currentPage.size());
-    }
-    // addressList.add(recordAddress);
-    // inMemSorter.insertRecord(recordAddress, partitionId);
   }
-
-  /**
-   * Close the sorter, causing any buffered data to be sorted and written out to disk.
-   *
-   * @return metadata for the spill files written by this sorter. If no records were ever inserted
-   *         into this sorter, then this will return an empty array.
-   * @throws IOException
-   */
-  // public SpillInfo[] closeAndGetSpills() throws IOException {
-  //   // if (inMemSorter != null) {
-  //   //   // Do not count the final file towards the spill count.
-  //   //   writeSortedFile(true);
-  //   //   freeMemory();
-  //   //   inMemSorter.free();
-  //   //   inMemSorter = null;
-  //   // }
-  //   return spills.toArray(new SpillInfo[spills.size()]);
-  // }
-
 }
