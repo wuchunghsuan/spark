@@ -107,8 +107,11 @@ final class OpsSharedManager extends MemoryConsumer {
 
   // These variables are reset after spilling:
   // @Nullable private ShuffleInMemorySorter inMemSorter;
-  @Nullable private MemoryBlock currentPage = null;
-  private long pageCursor = -1;
+  // @Nullable private MemoryBlock currentPage = null;
+  private MemoryBlock[] currentPages;
+
+  // private long pageCursor = -1;
+  private long[] pageCursors;
 
   OpsSharedManager(
       TaskMemoryManager memoryManager,
@@ -133,6 +136,8 @@ final class OpsSharedManager extends MemoryConsumer {
     this.writeMetrics = writeMetrics;
     this.diskWriteBufferSize =
         (int) (long) conf.get(package$.MODULE$.SHUFFLE_DISK_WRITE_BUFFER_SIZE());
+    this.currentPages = new MemoryBlock[numPartitions];
+    this.pageCursors = new long[numPartitions];
   }
   
   /**
@@ -148,11 +153,13 @@ final class OpsSharedManager extends MemoryConsumer {
   /**
    * Force all memory and spill files to be deleted; called by shuffle error-handling code.
    */
-  public void cleanupResources() { 
-    if (currentPage != null) {
-      addSharedPage(currentPage.pageNumber);
+  public void cleanupResources() {
+    for (int i = 0; i < numPartitions; i++) {
+      if (currentPages[i] != null) {
+        addSharedPage(currentPages[i].pageNumber);
+        currentPages[i] = null;
+      }
     }
-    currentPage = null;
   }
 
   /**
@@ -164,22 +171,23 @@ final class OpsSharedManager extends MemoryConsumer {
    *                      that exceed the page size are handled via a different code path which uses
    *                      special overflow pages).
    */
-  private void acquireNewPageIfNecessary(int required) {
-    if (currentPage == null ||
-      pageCursor + required > currentPage.getBaseOffset() + currentPage.size() ) {
-      if (currentPage != null) {
-        addSharedPage(currentPage.pageNumber);
+  private void acquireNewPageIfNecessary(int required, int partitionId) {
+    if (currentPages[partitionId] == null ||
+      pageCursors[partitionId] + required > currentPages[partitionId].getBaseOffset() + currentPages[partitionId].size() ) {
+      if (currentPages[partitionId] != null) {
+        addSharedPage(currentPages[partitionId].pageNumber);
       }
-      currentPage = null;
-      while (currentPage == null) {
+      currentPages[partitionId] = null;
+      while (currentPages[partitionId] == null) {
         try {
-          currentPage = allocateSharedPage(required);
-          if (currentPage == null) {
+          currentPages[partitionId] = allocateSharedPage(required);
+          if (currentPages[partitionId] == null) {
             // sleep, wait for retry
             Thread.sleep(1000);
             continue;
           }
-          pageCursor = currentPage.getBaseOffset();
+          currentPages[partitionId].partitionId = partitionId;
+          pageCursors[partitionId] = currentPages[partitionId].getBaseOffset();
         } catch (InterruptedException e) {
           e.printStackTrace();
         }
@@ -192,19 +200,19 @@ final class OpsSharedManager extends MemoryConsumer {
    */
   public void insertRecord(Object recordBase, long recordOffset, int length, int partitionId)
     throws IOException {
-    final int uaoSize = UnsafeAlignedOffset.getUaoSize();
+    // final int uaoSize = UnsafeAlignedOffset.getUaoSize();
     // Need 4 or 8 bytes to store the record length.
-    final int required = length + uaoSize;
-    acquireNewPageIfNecessary(required);
+    // final int required = length + uaoSize;
+    final int required = length;
+    acquireNewPageIfNecessary(required, partitionId);
 
-    assert(currentPage != null);
-    final Object base = currentPage.getBaseObject();
+    assert(currentPages[partitionId] != null);
+    final Object base = currentPages[partitionId].getBaseObject();
 
-    currentPage.pointers.add(new OpsPointer(pageCursor, partitionId));
-    UnsafeAlignedOffset.putSize(base, pageCursor, length);
-    // long tmp = pageCursor;
-    pageCursor += uaoSize;
-    Platform.copyMemory(recordBase, recordOffset, base, pageCursor, length);
-    pageCursor += length;
+    currentPages[partitionId].pointers.add(new OpsPointer(pageCursors[partitionId], length, partitionId));
+    // UnsafeAlignedOffset.putSize(base, pageCursor, length);
+    // pageCursor += uaoSize;
+    Platform.copyMemory(recordBase, recordOffset, base, pageCursors[partitionId], length);
+    pageCursors[partitionId] += length;
   }
 }

@@ -99,7 +99,7 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
                 this.totalPages += 1;
                 this.usedPages += 1;
               }
-              System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
+              // System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
               return memory;
             }
           }
@@ -127,7 +127,7 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
       this.totalPages += 1;
       this.usedPages += 1;
     }
-    System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
+    // System.out.println(System.currentTimeMillis()/1000 + ": Allocate page " + memory.pageNumber + ", size: " + size + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
     return memory;
   }
 
@@ -138,7 +138,7 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     assert (memory.pageNumber != MemoryBlock.FREED_IN_ALLOCATOR_PAGE_NUMBER) :
       "page has already been freed";
 
-    System.out.println(System.currentTimeMillis()/1000 + ": Free page " + memory.pageNumber + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
+    // System.out.println(System.currentTimeMillis()/1000 + ": Free page " + memory.pageNumber + ", used: " + this.usedMemory/1000000 + ", " + this.usedPages + ", " + this.totalPages);
     
     final long size = memory.size();
     synchronized (this) {

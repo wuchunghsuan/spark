@@ -23,6 +23,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.List;
 import javax.annotation.Nullable;
+import java.util.LinkedList;
+import java.util.HashMap;
 
 import scala.None$;
 import scala.Option;
@@ -104,6 +106,9 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
   @Nullable private MapStatus mapStatus;
   private long[] partitionLengths;
 
+  private int numWriters = 5;
+  private HashMap<Integer, LinkedList<MemoryBlock>> pendingPages = new HashMap<>();
+
   // OPS log
   private TaskMetrics taskMetrics;
 
@@ -141,6 +146,14 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     this.mapOutputTracker = tracker;
     this.executorId = executorId;
     this.totalMapsNum = mapsNum;
+
+    for (int i = 0; i < this.numWriters; i++) {
+      this.pendingPages.put(i, new LinkedList<>());
+    }
+  }
+
+  private int partitionToNum(int partitionId) {
+    return partitionId % this.numWriters;
   }
 
   public void writePage(MemoryBlock page) {
@@ -152,10 +165,11 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
       DiskBlockObjectWriter writer = partitionWriters[pointer.partitionId];
       final Object recordPage = page.getBaseObject();
       final long recordOffsetInPage = pointer.pageOffset;
-      int dataRemaining = UnsafeAlignedOffset.getSize(recordPage, recordOffsetInPage);
-      long recordReadPosition = recordOffsetInPage + uaoSize; // skip over record length
+      // int dataRemaining = UnsafeAlignedOffset.getSize(recordPage, recordOffsetInPage);
+      long dataRemaining = pointer.length;
+      long recordReadPosition = recordOffsetInPage;
       while (dataRemaining > 0) {
-        final int toTransfer = Math.min(diskWriteBufferSize, dataRemaining);
+        final int toTransfer = (int)Math.min(diskWriteBufferSize, dataRemaining);
         Platform.copyMemory(
           recordPage, recordReadPosition, writeBuffer, Platform.BYTE_ARRAY_OFFSET, toTransfer);
         writer.write(writeBuffer, 0, toTransfer);
@@ -166,7 +180,23 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     }
   }
 
-  private void freeSharedPage(MemoryBlock page) {
+  public synchronized void addPages(List<MemoryBlock> pages) {
+    for (MemoryBlock page : pages) {
+      int id = partitionToNum(page.partitionId);
+      this.pendingPages.get(id).add(page);
+    }
+    notifyAll();
+  }
+
+  public synchronized MemoryBlock getPage(int id) throws InterruptedException {
+    LinkedList<MemoryBlock> pendingList = this.pendingPages.get(id);
+    while(pendingList.isEmpty()) {
+      wait();
+    }
+    return pendingList.removeFirst();
+  }
+
+  public void freeSharedPage(MemoryBlock page) {
     memoryManager.freeSharedPage(page);
   }
 
@@ -194,6 +224,12 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     // included in the shuffle write time.
     writeMetrics.incWriteTime(System.nanoTime() - openStartTime);
 
+    OpsPageWriter<K, V>[] pageWriters = new OpsPageWriter[numWriters];
+    for (int i = 0; i < numWriters; i++) {
+      pageWriters[i] = new OpsPageWriter<K, V>(this, i);
+      pageWriters[i].start();
+    }
+
     int pageNum = 0;
     boolean isLast = false;
     while (true) {
@@ -208,24 +244,43 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
       int pagesSize = pages.size();
       System.out.println("Get shared pages size: " + pages.size() + ", time: " + System.currentTimeMillis()/1000);
       pageNum += pages.size();
-      for (MemoryBlock page : pages) {
-        writePage(page);
-        freeSharedPage(page);
-      }
-      pages = null;
+      addPages(pages);
       
       if (isLast) {
         break;
       }
-      if (pagesSize == 0) {
-        try {
-          Thread.sleep(1000);
-        } catch (InterruptedException e) {
-          e.printStackTrace();
+      // if (pagesSize == 0) {
+      try {
+        Thread.sleep(1000);
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+        // continue;
+      // }
+    }
+
+    // wait for all pages done
+    while (true) {
+      boolean isEmpty = true;
+      for (int i = 0; i < this.numWriters; i++) {
+        if (!this.pendingPages.get(i).isEmpty()) {
+          isEmpty = false;
+          break;
         }
-        continue;
+      }
+      if (isEmpty) {
+        break;
+      }
+      try {
+        Thread.sleep(3000);
+      } catch (InterruptedException e) {
+        e.printStackTrace();
       }
     }
+    for (int i = 0; i < numWriters; i++) {
+      pageWriters[i].shutDown();
+    }
+
     System.out.println("Pre-merge total page num: " + pageNum);
 
     for (int i = 0; i < numPartitions; i++) {

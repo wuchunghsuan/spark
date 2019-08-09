@@ -18,12 +18,14 @@
 package org.apache.spark.unsafe.memory;
 
 public class OpsPointer {
-  public final Long pageOffset;
+  public final long pageOffset;
+  public final long length;
   public final int partitionId;
 
-  public OpsPointer(Long pageOffset, int partitionId) {
+  public OpsPointer(long pageOffset, long length, int partitionId) {
     this.pageOffset = pageOffset;
     this.partitionId = partitionId;
+    this.length = length;
   }
 
   @Override
