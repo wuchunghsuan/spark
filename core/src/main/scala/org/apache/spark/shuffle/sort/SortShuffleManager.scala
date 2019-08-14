@@ -88,19 +88,22 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
       shuffleId: Int,
       numMaps: Int,
       dependency: ShuffleDependency[K, V, C]): ShuffleHandle = {
-    if (SortShuffleWriter.shouldBypassMergeSort(conf, dependency)) {
-      // If there are fewer than spark.shuffle.sort.bypassMergeThreshold partitions and we don't
-      // need map-side aggregation, then write numPartitions files directly and just concatenate
-      // them at the end. This avoids doing serialization and deserialization twice to merge
-      // together the spilled files, which would happen with the normal code path. The downside is
-      // having multiple files open at a time and thus more memory allocated to buffers.
-      new BypassMergeSortShuffleHandle[K, V](
-        shuffleId, numMaps, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
-    } else if (SortShuffleManager.canUseSerializedShuffle(dependency)) {
+    // if (SortShuffleWriter.shouldBypassMergeSort(conf, dependency)) {
+    //   // If there are fewer than spark.shuffle.sort.bypassMergeThreshold partitions and we don't
+    //   // need map-side aggregation, then write numPartitions files directly and just concatenate
+    //   // them at the end. This avoids doing serialization and deserialization twice to merge
+    //   // together the spilled files, which would happen with the normal code path. The downside is
+    //   // having multiple files open at a time and thus more memory allocated to buffers.
+    //   new BypassMergeSortShuffleHandle[K, V](
+    //     shuffleId, numMaps, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
+    // } else if (SortShuffleManager.canUseSerializedShuffle(dependency)) {
+    if (SortShuffleManager.canUseSerializedShuffle(dependency)) {
+      println("Use SerializedShuffle.")
       // Otherwise, try to buffer map outputs in a serialized form, since this is more efficient:
       new SerializedShuffleHandle[K, V](
         shuffleId, numMaps, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
     } else {
+      println("Use BaseShuffle.")
       // Otherwise, buffer map outputs in a deserialized form:
       new BaseShuffleHandle(shuffleId, numMaps, dependency)
     }
@@ -185,19 +188,19 @@ private[spark] object SortShuffleManager extends Logging {
     val shufId = dependency.shuffleId
     val numPartitions = dependency.partitioner.numPartitions
     if (!dependency.serializer.supportsRelocationOfSerializedObjects) {
-      log.debug(s"Can't use serialized shuffle for shuffle $shufId because the serializer, " +
+      println(s"Can't use serialized shuffle for shuffle $shufId because the serializer, " +
         s"${dependency.serializer.getClass.getName}, does not support object relocation")
       false
     } else if (dependency.mapSideCombine) {
-      log.debug(s"Can't use serialized shuffle for shuffle $shufId because we need to do " +
+      println(s"Can't use serialized shuffle for shuffle $shufId because we need to do " +
         s"map-side aggregation")
       false
     } else if (numPartitions > MAX_SHUFFLE_OUTPUT_PARTITIONS_FOR_SERIALIZED_MODE) {
-      log.debug(s"Can't use serialized shuffle for shuffle $shufId because it has more than " +
+      println(s"Can't use serialized shuffle for shuffle $shufId because it has more than " +
         s"$MAX_SHUFFLE_OUTPUT_PARTITIONS_FOR_SERIALIZED_MODE partitions")
       false
     } else {
-      log.debug(s"Can use serialized shuffle for shuffle $shufId")
+      println(s"Can use serialized shuffle for shuffle $shufId")
       true
     }
   }
