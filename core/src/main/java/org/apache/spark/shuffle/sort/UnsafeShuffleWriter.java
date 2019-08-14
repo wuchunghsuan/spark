@@ -187,6 +187,8 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
       while (records.hasNext()) {
         insertRecordIntoSorter(records.next());
       }
+      // OPS log
+      this.taskContext.taskMetrics().setOpsSortStart(System.currentTimeMillis());
       closeAndWriteOutput();
       success = true;
     } finally {
@@ -281,6 +283,7 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
    * @return the partition lengths in the merged file.
    */
   private long[] mergeSpills(SpillInfo[] spills, File outputFile) throws IOException {
+    long start = System.currentTimeMillis();
     final boolean compressionEnabled = sparkConf.getBoolean("spark.shuffle.compress", true);
     final CompressionCodec compressionCodec = CompressionCodec$.MODULE$.createCodec(sparkConf);
     final boolean fastMergeEnabled =
@@ -331,6 +334,8 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
         // SpillInfo's bytes.
         writeMetrics.decBytesWritten(spills[spills.length - 1].file.length());
         writeMetrics.incBytesWritten(outputFile.length());
+        // OPS log
+        taskContext.taskMetrics().incOpsSpillTime(System.currentTimeMillis() - start);
         return partitionLengths;
       }
     } catch (IOException e) {

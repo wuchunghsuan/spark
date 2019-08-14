@@ -255,6 +255,8 @@ final class ShuffleExternalSorter extends MemoryConsumer {
       return 0L;
     }
 
+    long start = System.currentTimeMillis();
+
     logger.info("Thread {} spilling sort data of {} to disk ({} {} so far)",
       Thread.currentThread().getId(),
       Utils.bytesToString(getMemoryUsage()),
@@ -268,6 +270,8 @@ final class ShuffleExternalSorter extends MemoryConsumer {
     // records. Otherwise, if the task is over allocated memory, then without freeing the memory
     // pages, we might not be able to get memory for the pointer array.
     taskContext.taskMetrics().incMemoryBytesSpilled(spillSize);
+    // OPS log
+    taskContext.taskMetrics().incOpsSpillTime(System.currentTimeMillis() - start);
     return spillSize;
   }
 
