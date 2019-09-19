@@ -34,6 +34,7 @@ import scala.collection.Iterator;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.io.Closeables;
+import com.google.common.io.Files;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -216,6 +217,8 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
         blockManager.diskBlockManager().createTempShuffleBlock();
       final File file = tempShuffleBlockIdPlusFile._2();
       final BlockId blockId = tempShuffleBlockIdPlusFile._1();
+      // final File file = shuffleBlockResolver.getDataFile(shuffleId, mapId, i);
+      // final BlockId blockId = new ShuffleDataBlockId(shuffleId, mapId, i);
       partitionWriters[i] =
         blockManager.getDiskWriter(blockId, file, serInstance, fileBufferSize, writeMetrics);
     }
@@ -282,25 +285,39 @@ final class OpsSharedMasterWriter<K, V> extends ShuffleWriter<K, V> {
     }
 
     System.out.println("Pre-merge total page num: " + pageNum);
-
+    
     for (int i = 0; i < numPartitions; i++) {
       final DiskBlockObjectWriter writer = partitionWriters[i];
       partitionWriterSegments[i] = writer.commitAndGet();
+      // System.out.println("Commit partitionWriterSegments[i]: " + partitionWriterSegments[i].toString());
       writer.close();
     }
 
-    File output = shuffleBlockResolver.getDataFile(shuffleId, mapId);
-    File tmp = Utils.tempFileWith(output);
-    try {
-      partitionLengths = writePartitionedFile(tmp);
-      shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, tmp);
-    } finally {
-      if (tmp.exists() && !tmp.delete()) {
-        logger.error("Error while deleting temp file {}", tmp.getAbsolutePath());
-      }
+    long startMerge = System.currentTimeMillis();
+    
+    // File output = shuffleBlockResolver.getDataFile(shuffleId, mapId);
+    // File tmp = Utils.tempFileWith(output);
+    // try {
+    //   partitionLengths = writePartitionedFile(tmp);
+    //   shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, tmp);
+    // } finally {
+    //   if (tmp.exists() && !tmp.delete()) {
+    //     logger.error("Error while deleting temp file {}", tmp.getAbsolutePath());
+    //   }
+    // }
+
+    final long[] partitionLengths = new long[numPartitions];
+    for (int i = 0; i < numPartitions; i++) {
+      partitionLengths[i] = partitionWriterSegments[i].file().length();
+        final File outputFile = shuffleBlockResolver.getDataFile(shuffleId, mapId, i);
+        Files.move(partitionWriterSegments[i].file(), outputFile);
     }
+
     mapStatus = MapStatus$.MODULE$.apply(blockManager.shuffleServerId(), partitionLengths);
 
+    long mergeTime = System.currentTimeMillis() - startMerge;
+    long totalTime = System.currentTimeMillis() - start;
+    System.out.println("Map Master: " + mergeTime + "-" + totalTime);
     // OPS log
     this.taskMetrics.incOpsSpillTime(System.currentTimeMillis() - start);
   }

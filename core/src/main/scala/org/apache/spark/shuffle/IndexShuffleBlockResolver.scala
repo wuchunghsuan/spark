@@ -51,32 +51,53 @@ private[spark] class IndexShuffleBlockResolver(
 
   private val transportConf = SparkTransportConf.fromSparkConf(conf, "shuffle")
 
+  // For OPS
+  private var reduce = 0;
+  def getDataFile(shuffleId: Int, mapId: Int, reduceId: Int): File = {
+    if (reduceId > reduce) {
+      reduce = reduceId
+    }
+    blockManager.diskBlockManager.getFile(ShuffleDataBlockId(shuffleId, mapId, reduceId))
+  }
   def getDataFile(shuffleId: Int, mapId: Int): File = {
-    blockManager.diskBlockManager.getFile(ShuffleDataBlockId(shuffleId, mapId, NOOP_REDUCE_ID))
+    // blockManager.diskBlockManager.getFile(ShuffleDataBlockId(shuffleId, mapId, NOOP_REDUCE_ID))
+    return null
   }
 
   private def getIndexFile(shuffleId: Int, mapId: Int): File = {
-    blockManager.diskBlockManager.getFile(ShuffleIndexBlockId(shuffleId, mapId, NOOP_REDUCE_ID))
+    // blockManager.diskBlockManager.getFile(ShuffleIndexBlockId(shuffleId, mapId, NOOP_REDUCE_ID))
+    return null
   }
 
   /**
    * Remove data file and index file that contain the output data from one map.
    */
   def removeDataByMap(shuffleId: Int, mapId: Int): Unit = {
-    var file = getDataFile(shuffleId, mapId)
-    if (file.exists()) {
-      if (!file.delete()) {
-        logWarning(s"Error deleting data ${file.getPath()}")
-      }
-    }
-
-    file = getIndexFile(shuffleId, mapId)
-    if (file.exists()) {
-      if (!file.delete()) {
-        logWarning(s"Error deleting index ${file.getPath()}")
+    var id = 0
+    for(id <- 0 to reduce) {
+      var file = getDataFile(shuffleId, mapId, id)
+      if (file.exists()) {
+        if (!file.delete()) {
+          logWarning(s"Error deleting data ${file.getPath()}")
+        }
       }
     }
   }
+  // def removeDataByMap(shuffleId: Int, mapId: Int): Unit = {
+  //   var file = getDataFile(shuffleId, mapId)
+  //   if (file.exists()) {
+  //     if (!file.delete()) {
+  //       logWarning(s"Error deleting data ${file.getPath()}")
+  //     }
+  //   }
+
+  //   file = getIndexFile(shuffleId, mapId)
+  //   if (file.exists()) {
+  //     if (!file.delete()) {
+  //       logWarning(s"Error deleting index ${file.getPath()}")
+  //     }
+  //   }
+  // }
 
   /**
    * Check whether the given index and data files match each other.
@@ -191,37 +212,49 @@ private[spark] class IndexShuffleBlockResolver(
   }
 
   override def getBlockData(blockId: ShuffleBlockId): ManagedBuffer = {
-    // The block is actually going to be a range of a single map output file for this map, so
-    // find out the consolidated file, then the offset within that from our index
-    val indexFile = getIndexFile(blockId.shuffleId, blockId.mapId)
-
-    // SPARK-22982: if this FileInputStream's position is seeked forward by another piece of code
-    // which is incorrectly using our file descriptor then this code will fetch the wrong offsets
-    // (which may cause a reducer to be sent a different reducer's data). The explicit position
-    // checks added here were a useful debugging aid during SPARK-22982 and may help prevent this
-    // class of issue from re-occurring in the future which is why they are left here even though
-    // SPARK-22982 is fixed.
-    val channel = Files.newByteChannel(indexFile.toPath)
-    channel.position(blockId.reduceId * 8L)
-    val in = new DataInputStream(Channels.newInputStream(channel))
-    try {
-      val offset = in.readLong()
-      val nextOffset = in.readLong()
-      val actualPosition = channel.position()
-      val expectedPosition = blockId.reduceId * 8L + 16
-      if (actualPosition != expectedPosition) {
-        throw new Exception(s"SPARK-22982: Incorrect channel position after index file reads: " +
-          s"expected $expectedPosition but actual position was $actualPosition.")
-      }
-      new FileSegmentManagedBuffer(
+    val dataFile = getDataFile(blockId.shuffleId, blockId.mapId, blockId.reduceId)
+    println("getBlockData: " + dataFile.exists() + ", " + dataFile.getName() + ", " + dataFile.length())
+    new FileSegmentManagedBuffer(
         transportConf,
-        getDataFile(blockId.shuffleId, blockId.mapId),
-        offset,
-        nextOffset - offset)
-    } finally {
-      in.close()
-    }
+        dataFile,
+        0,
+        dataFile.length())
   }
+  // override def getBlockData(blockId: ShuffleBlockId): ManagedBuffer = {
+  //   // The block is actually going to be a range of a single map output file for this map, so
+  //   // find out the consolidated file, then the offset within that from our index
+  //   val indexFile = getIndexFile(blockId.shuffleId, blockId.mapId)
+
+  //   // SPARK-22982: if this FileInputStream's position is seeked forward by another piece of code
+  //   // which is incorrectly using our file descriptor then this code will fetch the wrong offsets
+  //   // (which may cause a reducer to be sent a different reducer's data). The explicit position
+  //   // checks added here were a useful debugging aid during SPARK-22982 and may help prevent this
+  //   // class of issue from re-occurring in the future which is why they are left here even though
+  //   // SPARK-22982 is fixed.
+  //   val channel = Files.newByteChannel(indexFile.toPath)
+  //   channel.position(blockId.reduceId * 8L)
+  //   val in = new DataInputStream(Channels.newInputStream(channel))
+  //   try {
+  //     val offset = in.readLong()
+  //     val nextOffset = in.readLong()
+  //     val actualPosition = channel.position()
+  //     val expectedPosition = blockId.reduceId * 8L + 16
+  //     if (actualPosition != expectedPosition) {
+  //       throw new Exception(s"SPARK-22982: Incorrect channel position after index file reads: " +
+  //         s"expected $expectedPosition but actual position was $actualPosition.")
+  //     }
+  //     val ll = nextOffset - offset
+  //     val dataFile = getDataFile(blockId.shuffleId, blockId.mapId)
+  //     println("Block data: " + dataFile.getName() + ", " + offset + ", " + ll + ", " + dataFile.length())
+  //     new FileSegmentManagedBuffer(
+  //       transportConf,
+  //       getDataFile(blockId.shuffleId, blockId.mapId),
+  //       offset,
+  //       nextOffset - offset)
+  //   } finally {
+  //     in.close()
+  //   }
+  // }
 
   override def stop(): Unit = {}
 }
