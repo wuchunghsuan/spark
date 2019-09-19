@@ -867,7 +867,7 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
 
   def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])] = {
     val statuses = this.localMapStatuses(shuffleId).toArray
-    println("Get local statuses, size: " + statuses.length)
+    // println("Get local statuses, size: " + statuses.length)
     MapOutputTracker.convertLocalMapStatuses(shuffleId, 0, 1, statuses)
   }
 
@@ -876,8 +876,8 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
     val startTime = System.currentTimeMillis
     val localSize = this.localMapStatuses(shuffleId).length
     val totalSize = askTracker[Int](SyncSize(shuffleId, executorId, localSize))
-    println(s"Sync map output statuses for shuffle $shuffleId took " +
-        s"${System.currentTimeMillis - startTime} ms, totalSize: " + totalSize)
+    // println(s"Sync map output statuses for shuffle $shuffleId took " +
+    //     s"${System.currentTimeMillis - startTime} ms, totalSize: " + totalSize)
     return totalSize
   }
 
