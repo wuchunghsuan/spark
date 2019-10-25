@@ -253,16 +253,13 @@ final class ShuffleBlockFetcherIterator(
     // Fetch remote shuffle blocks to disk when the request is too large. Since the shuffle data is
     // already encrypted and compressed over the wire(w.r.t. the related configs), we can just fetch
     // the data and write it to file directly.
-    System.out.println("Force to fetch on disk! Threshold: " + maxReqSizeShuffleToMem.toLong)
-    shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
+    if (req.size > maxReqSizeShuffleToMem) {
+      shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
         blockFetchingListener, this)
-    // if (req.size > maxReqSizeShuffleToMem) {
-    //   shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
-    //     blockFetchingListener, this)
-    // } else {
-    //   shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
-    //     blockFetchingListener, null)
-    // }
+    } else {
+      shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
+        blockFetchingListener, null)
+    }
   }
 
   private[this] def splitLocalRemoteBlocks(): ArrayBuffer[FetchRequest] = {
@@ -478,6 +475,9 @@ final class ShuffleBlockFetcherIterator(
                 result = null
               }
           } finally {
+
+            System.out.println("OPS: shuffleIterator next() : " + numBlocksProcessed)
+
             // TODO: release the buf here to free memory earlier
             if (isStreamCopied) {
               in.close()

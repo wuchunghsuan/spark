@@ -234,7 +234,7 @@ private[spark] abstract class MemoryManager(
   /**
    * Allocates memory for use by Unsafe/Tungsten code.
    */
-  private[memory] var tungstenMemoryAllocator: MemoryAllocator = new OpsSharedMemoryAllocator(onHeapExecutionMemory + onHeapStorageMemory)
+  private[memory] final var tungstenMemoryAllocator: MemoryAllocator = new OpsSharedMemoryAllocator(onHeapExecutionMemory + onHeapStorageMemory)
 
   private[memory] def cleanOpsAllocator() {
     tungstenMemoryAllocator = null

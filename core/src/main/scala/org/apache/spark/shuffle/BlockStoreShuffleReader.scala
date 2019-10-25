@@ -120,7 +120,7 @@ private[spark] class BlockStoreShuffleReader[K, C](
       case None =>
         aggregatedIter
     }
-
+    
     // OPS log
     context.taskMetrics().setOpsReduceStart(System.currentTimeMillis())
 

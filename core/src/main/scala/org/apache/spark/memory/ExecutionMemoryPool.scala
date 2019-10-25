@@ -124,8 +124,10 @@ private[memory] class ExecutionMemoryPool(
       // occupies. Otherwise, we may run into SPARK-12155 where, in unified memory management,
       // we did not take into account space that could have been freed by evicting cached blocks.
       val maxPoolSize = computeMaxPoolSize()
-      val maxMemoryPerTask = maxPoolSize / numActiveTasks
-      val minMemoryPerTask = poolSize / (2 * numActiveTasks)
+
+      // OPS: Due to using pre-merge, we need to reserve enough memory capacity for the large shuffle data. 
+      val maxMemoryPerTask = maxPoolSize / numActiveTasks - 300000000
+      val minMemoryPerTask = poolSize / (2 * numActiveTasks) - 300000000
 
       // How much we can grant this task; keep its share within 0 <= X <= 1 / numActiveTasks
       val maxToGrant = math.min(numBytes, math.max(0, maxMemoryPerTask - curMem))
