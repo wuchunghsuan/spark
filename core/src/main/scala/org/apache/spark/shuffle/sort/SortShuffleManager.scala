@@ -88,24 +88,27 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
       shuffleId: Int,
       numMaps: Int,
       dependency: ShuffleDependency[K, V, C]): ShuffleHandle = {
-    if (SortShuffleWriter.shouldBypassMergeSort(conf, dependency)) {
-      // If there are fewer than spark.shuffle.sort.bypassMergeThreshold partitions and we don't
-      // need map-side aggregation, then write numPartitions files directly and just concatenate
-      // them at the end. This avoids doing serialization and deserialization twice to merge
-      // together the spilled files, which would happen with the normal code path. The downside is
-      // having multiple files open at a time and thus more memory allocated to buffers.
-      new BypassMergeSortShuffleHandle[K, V](
+    // if (SortShuffleWriter.shouldBypassMergeSort(conf, dependency)) {
+    //   // If there are fewer than spark.shuffle.sort.bypassMergeThreshold partitions and we don't
+    //   // need map-side aggregation, then write numPartitions files directly and just concatenate
+    //   // them at the end. This avoids doing serialization and deserialization twice to merge
+    //   // together the spilled files, which would happen with the normal code path. The downside is
+    //   // having multiple files open at a time and thus more memory allocated to buffers.
+    //   new BypassMergeSortShuffleHandle[K, V](
+    //     shuffleId, numMaps, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
+    // } else if (SortShuffleManager.canUseSerializedShuffle(dependency)) {
+    //   // Otherwise, try to buffer map outputs in a serialized form, since this is more efficient:
+    //   println("Force to use unSafeShuffle.");
+    //   new SerializedShuffleHandle[K, V](
+    //     shuffleId, numMaps, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
+    // } else {
+    //   println("Oops! Fail to use unSafeShuffle.");
+    //   // Otherwise, buffer map outputs in a deserialized form:
+    //   new BaseShuffleHandle(shuffleId, numMaps, dependency)
+    // }
+    println("Force to use unSafeShuffle.");
+    new SerializedShuffleHandle[K, V](
         shuffleId, numMaps, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
-    } else if (SortShuffleManager.canUseSerializedShuffle(dependency)) {
-      // Otherwise, try to buffer map outputs in a serialized form, since this is more efficient:
-      println("Force to use unSafeShuffle.");
-      new SerializedShuffleHandle[K, V](
-        shuffleId, numMaps, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
-    } else {
-      println("Oops! Fail to use unSafeShuffle.");
-      // Otherwise, buffer map outputs in a deserialized form:
-      new BaseShuffleHandle(shuffleId, numMaps, dependency)
-    }
   }
 
   /**
@@ -194,7 +197,7 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
     val env = SparkEnv.get
     handle match {
       case unsafeShuffleHandle: SerializedShuffleHandle[K @unchecked, V @unchecked] =>
-        new OpsSharedMasterWriter(
+        new OpsPreShuffleWriter(
           env.blockManager,
           shuffleBlockResolver.asInstanceOf[IndexShuffleBlockResolver],
           unsafeShuffleHandle,
