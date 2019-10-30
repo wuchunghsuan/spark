@@ -17,7 +17,9 @@
 
 package org.apache.spark.unsafe.memory;
 
-public class OpsPointer {
+import java.io.Serializable;
+
+public class OpsPointer implements Serializable {
   public final long pageOffset;
   public final long length;
   public final int partitionId;

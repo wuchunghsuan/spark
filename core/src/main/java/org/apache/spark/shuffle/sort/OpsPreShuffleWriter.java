@@ -18,6 +18,8 @@
 package org.apache.spark.shuffle.sort;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -35,6 +37,8 @@ import com.google.common.io.Closeables;
 import com.google.common.io.Files;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.coreos.jetcd.data.KeyValue;
 
 import org.apache.spark.Partitioner;
 import org.apache.spark.ShuffleDependency;
@@ -79,13 +83,14 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
   private final SparkConf conf;
 
   /** Array of file writers, one for each partition */
-  private DiskBlockObjectWriter[] partitionWriters;
-  private FileSegment[] partitionWriterSegments;
   @Nullable private MapStatus mapStatus;
   private long[] partitionLengths;
 
-  private int numWriters = 5;
+  private final int numWriters;
   private HashMap<Integer, ConcurrentLinkedQueue<MemoryBlock>> pendingPages = new HashMap<>();
+
+  private final List<String> opsWorkers = new ArrayList<>();
+  private final OpsTransferer<K, V>[] opsTransferers;
 
   // OPS log
   private TaskMetrics taskMetrics;
@@ -126,12 +131,28 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     this.totalMapsNum = mapsNum;
     this.conf = conf;
 
-    for (int i = 0; i < this.numWriters; i++) {
-      this.pendingPages.put(i, new ConcurrentLinkedQueue<>());
+    
+    // Init EtcdService
+    String tmpStr = conf.get("spark.ops.etcd", "http://127.0.0.1:2379");
+    System.out.println("Get spark.ops.etcd: " + tmpStr);
+    List<String> endpoints = Arrays.asList(tmpStr.split(";"));
+    OpsEtcdService.initClient(endpoints);
+    
+    // Get opsWorkers ip form etcd
+    List<KeyValue> workersKV = OpsEtcdService.getKVs("ops/nodes/worker");
+    workersKV.stream().forEach(kv -> this.opsWorkers.add(kv.getValue().toStringUtf8()));
+    if (this.opsWorkers.size() == 0) {
+      System.out.println("Workers not found from etcd server. Add \"127.0.0.1:14020\" for default.");
+      this.opsWorkers.add("127.0.0.1:14020");
     }
 
-    System.out.println("Test sparkconf: etcd: " + conf.get("spark.ops.etcd", "defaults"));
-    System.out.println("Test sparkconf: test: " + conf.get("spark.ops.test", "defaults"));
+    this.numWriters = this.opsWorkers.size();
+    this.opsTransferers = new OpsTransferer[this.numWriters];
+    for (int i = 0; i < this.numWriters; i++) {
+      this.pendingPages.put(i, new ConcurrentLinkedQueue<>());
+      opsTransferers[i] = new OpsTransferer<K, V>(this, i, opsWorkers.get(i));
+      opsTransferers[i].start();
+    }
   }
 
   private int partitionToNum(int partitionId) {
@@ -172,11 +193,7 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     // included in the shuffle write time.
     writeMetrics.incWriteTime(System.nanoTime() - openStartTime);
 
-    OpsTransferer<K, V>[] opsTransferers = new OpsTransferer[numWriters];
-    for (int i = 0; i < numWriters; i++) {
-      opsTransferers[i] = new OpsTransferer<K, V>(this, i, conf);
-      opsTransferers[i].start();
-    }
+    
 
     int pageNum = 0;
     boolean isLast = false;
