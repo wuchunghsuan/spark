@@ -169,7 +169,7 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     return partitionId % this.numWriters;
   }
 
-  public void addPages(List<MemoryBlock> pages) {
+  public synchronized void addPages(List<MemoryBlock> pages) {
     for (MemoryBlock page : pages) {
       int id = partitionToNum(page.partitionId);
       this.pendingPages.get(id).add(page);
@@ -177,7 +177,7 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     notifyAll();
   }
 
-  public MemoryBlock getPage(int id) throws InterruptedException {
+  public synchronized MemoryBlock getPage(int id) throws InterruptedException {
     ConcurrentLinkedQueue<MemoryBlock> pendingList = this.pendingPages.get(id);
     while(pendingList.isEmpty()) {
       wait();
