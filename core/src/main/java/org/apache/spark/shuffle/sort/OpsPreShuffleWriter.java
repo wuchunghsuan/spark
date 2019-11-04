@@ -140,7 +140,14 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     
     // Get opsWorkers ip form etcd
     List<KeyValue> workersKV = OpsEtcdService.getKVs("ops/nodes/worker");
-    workersKV.stream().forEach(kv -> this.opsWorkers.add(kv.getValue().toStringUtf8()));
+    for (KeyValue keyValue : workersKV) {
+      String str = keyValue.getValue().toStringUtf8();
+      String prefix = "http://";
+      if(str.startsWith(prefix)) {
+        str = str.substring(prefix.length());
+      }
+      this.opsWorkers.add(str);
+    }
     if (this.opsWorkers.size() == 0) {
       System.out.println("Workers not found from etcd server. Add \"127.0.0.1:14020\" for default.");
       this.opsWorkers.add("127.0.0.1:14020");
@@ -150,7 +157,10 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     this.opsTransferers = new OpsTransferer[this.numWriters];
     for (int i = 0; i < this.numWriters; i++) {
       this.pendingPages.put(i, new ConcurrentLinkedQueue<>());
-      opsTransferers[i] = new OpsTransferer<K, V>(this, i, opsWorkers.get(i));
+      // split worker string to ip & port.
+      String[] worker = opsWorkers.get(i).split(":");
+      assert(worker.length == 2);
+      opsTransferers[i] = new OpsTransferer<K, V>(this, i, worker[0], Integer.parseInt(worker[1]));
       opsTransferers[i].start();
     }
   }

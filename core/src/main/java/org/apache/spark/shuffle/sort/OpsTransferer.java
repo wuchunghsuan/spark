@@ -159,7 +159,9 @@ final class OpsTransferer<K, V> extends Thread {
         i++;
       }
 
-      Page page = Page.newBuilder().setContent(ByteString.copyFrom((byte[])block.getBaseObject())).setPointers(bos.toByteArray()).build();
+      Page page = Page.newBuilder()
+          .setContent(ByteString.copyFrom((byte[])block.getBaseObject()))
+          .setPointers(ByteString.copyFrom(bos.toByteArray())).build();
       // logger.debug("Transfer data. Length: " + block.getBaseObject().length);
       this.requestObserver.onNext(page);
       // this.requestObserver.onCompleted();
@@ -172,8 +174,12 @@ final class OpsTransferer<K, V> extends Thread {
     } catch (Exception e) {
         e.printStackTrace();
     } finally {
-      oos.close();
-      bos.close();
+      try {
+        oos.close();
+        bos.close();
+      } catch (Exception e) {
+        e.printStackTrace();
+      }
     }
   }
 
