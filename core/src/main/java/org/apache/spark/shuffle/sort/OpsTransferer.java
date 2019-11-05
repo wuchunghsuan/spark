@@ -17,10 +17,11 @@
 
 package org.apache.spark.shuffle.sort;
 
-import java.io.ByteArrayOutputStream;
-import java.io.ObjectOutputStream;
+import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.unsafe.UnsafeAlignedOffset;
 import org.apache.spark.unsafe.memory.MemoryBlock;
@@ -142,26 +143,38 @@ final class OpsTransferer<K, V> extends Thread {
         
     // long duration = System.currentTimeMillis() - start;
     // logger.info("[OPS]-" + shuffle.getTask().getJobId() + "-" + start + "-" + duration + "-" + shuffle.getData().length);
-    ByteArrayOutputStream bos = null;
-    ObjectOutputStream oos = null;
     try {
-      bos = new ByteArrayOutputStream();
-      oos = new ObjectOutputStream(bos);
-      oos.writeObject(block.pointers);
-      oos.close();
-
       int i = 0;
       for (OpsPointer pointer : block.pointers) {
-        if(i < 5) {
+        if(i > 5) {
             break;
         }
         System.out.println("Serialize pointer " + i + " :" + pointer.pageOffset + ", " + pointer.partitionId + ", " + pointer.length);
         i++;
       }
+      LinkedList<Long> offsets = new LinkedList<>();
+      LinkedList<Long> lengths = new LinkedList<>();
+      for (OpsPointer pointer : block.pointers) {
+        offsets.add(pointer.pageOffset);
+        lengths.add(pointer.length);
+      }
+
+      Long[] content = ArrayUtils.toObject((long[])block.getBaseObject());
+
+      i = 0;
+      for (Long tmp : content) {
+          if(i > 5) {
+              break;
+          }
+          System.out.println("Test content " + i + " :" + tmp);
+          i++;
+      }
 
       Page page = Page.newBuilder()
-          .setContent(ByteString.copyFrom((byte[])block.getBaseObject()))
-          .setPointers(ByteString.copyFrom(bos.toByteArray())).build();
+          .addAllContent(Arrays.asList(content))
+          .addAllOffsets(offsets)
+          .addAllLengths(lengths)
+          .setPartitionId(block.partitionId).build();
       // logger.debug("Transfer data. Length: " + block.getBaseObject().length);
       this.requestObserver.onNext(page);
       // this.requestObserver.onCompleted();
@@ -173,13 +186,6 @@ final class OpsTransferer<K, V> extends Thread {
         throw e;
     } catch (Exception e) {
         e.printStackTrace();
-    } finally {
-      try {
-        oos.close();
-        bos.close();
-      } catch (Exception e) {
-        e.printStackTrace();
-      }
     }
   }
 
