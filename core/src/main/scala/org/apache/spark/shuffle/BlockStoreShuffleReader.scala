@@ -24,6 +24,8 @@ import org.apache.spark.storage.{BlockManager, ShuffleBlockFetcherIterator}
 import org.apache.spark.util.CompletionIterator
 import org.apache.spark.util.collection.ExternalSorter
 
+import java.net.InetAddress;
+
 /**
  * Fetches and reads the partitions in range [startPartition, endPartition) from a shuffle by
  * requesting them from other nodes' block stores.
@@ -45,6 +47,13 @@ private[spark] class BlockStoreShuffleReader[K, C](
     // OPS log
     val start = System.currentTimeMillis()
     context.taskMetrics().setOpsFetchStart(start)
+
+    val addr: InetAddress = InetAddress.getLocalHost()
+    val path: String = mapOutputTracker.getShuffle(addr.getHostAddress())
+    if(path == null) {
+      println("Get null path.")
+    }
+    println("Reader on " + addr.getHostAddress() + " get path: " + path)
 
     val wrappedStreams = new ShuffleBlockFetcherIterator(
       context,

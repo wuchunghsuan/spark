@@ -18,6 +18,8 @@
 package org.apache.spark.shuffle.sort;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Set;
 import java.util.LinkedList;
 import java.util.concurrent.TimeUnit;
 
@@ -43,14 +45,28 @@ final class OpsTransferer<K, V> extends Thread {
   private final int targetPort;
   private final ManagedChannel channel;
   private final StreamObserver<Page> requestObserver;
+  private final Set<Integer> partitionSet;
+  private final HashMap<Integer, String> pathMap;
 
-  public OpsTransferer(OpsPreShuffleWriter<K, V> master, int id, String ip, int port) {
+
+  public OpsTransferer(OpsPreShuffleWriter<K, V> master, int id, String ip, int port, Set<Integer> partitionSet) {
     this.masterWriter = master;
     this.id = id;
     this.targetIp = ip;
     this.targetPort = port;
+    this.partitionSet = partitionSet;
+    this.pathMap = new HashMap<>();
+    
+    for (Integer partitionId : partitionSet) {
+      String path = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/") 
+          + OpsUtils.getMapOutputPath(
+            masterWriter.conf.getAppId(), 
+            Integer.toString(this.masterWriter.mapId), 
+            partitionId);
+      this.pathMap.put(partitionId, path);
+    }
 
-    System.out.println("OpsTransferer start. Target: " + ip + ":" + port);
+    System.out.println("OpsTransferer start. Target: " + ip + ":" + port + ". PartitionSet: " + partitionSet);
 
     channel = ManagedChannelBuilder.forAddress(ip, port).usePlaintext().build();
     OpsShuffleDataGrpc.OpsShuffleDataStub asyncStub = OpsShuffleDataGrpc.newStub(channel);
@@ -116,7 +132,7 @@ final class OpsTransferer<K, V> extends Thread {
     }
   }
 
-  private void shuffle(MemoryBlock block) throws IllegalArgumentException {
+  private void shuffle(MemoryBlock block) {
     // final int uaoSize = UnsafeAlignedOffset.getUaoSize();
     // final int diskWriteBufferSize = 1024 * 1024;
     // final byte[] writeBuffer = new byte[diskWriteBufferSize];
@@ -143,6 +159,10 @@ final class OpsTransferer<K, V> extends Thread {
         
     // long duration = System.currentTimeMillis() - start;
     // logger.info("[OPS]-" + shuffle.getTask().getJobId() + "-" + start + "-" + duration + "-" + shuffle.getData().length);
+    if(!this.partitionSet.contains(block.partitionId)) {
+      System.err.println("Wrong page: illegal partition id " + block.partitionId);
+      return;
+    }
     try {
       int i = 0;
       for (OpsPointer pointer : block.pointers) {
@@ -170,11 +190,13 @@ final class OpsTransferer<K, V> extends Thread {
           i++;
       }
 
+      String path = this.pathMap.get(block.partitionId);
+
       Page page = Page.newBuilder()
           .addAllContent(Arrays.asList(content))
           .addAllOffsets(offsets)
           .addAllLengths(lengths)
-          .setPartitionId(block.partitionId).build();
+          .setPath(path).build();
       // logger.debug("Transfer data. Length: " + block.getBaseObject().length);
       this.requestObserver.onNext(page);
       // this.requestObserver.onCompleted();
@@ -193,10 +215,18 @@ final class OpsTransferer<K, V> extends Thread {
     this.stopped = true;
     try {
       this.requestObserver.onCompleted();
+      commit();
       interrupt();
       join(5000);
     } catch (Exception ie) {
       ie.printStackTrace();
+    }
+  }
+
+  private void commit() {
+    for (String path : this.pathMap.values()) {
+      System.out.println("Commit shuffle: " + targetIp + ": " + path);
+      this.masterWriter.mapOutputTracker.commitShuffle(targetIp, path);
     }
   }
 }

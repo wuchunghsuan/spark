@@ -18,7 +18,7 @@
 package org.apache.spark
 
 import java.io._
-import java.util.concurrent.{ConcurrentHashMap, LinkedBlockingQueue, ThreadPoolExecutor}
+import java.util.concurrent.{ConcurrentHashMap, LinkedBlockingQueue, ThreadPoolExecutor, ConcurrentLinkedQueue}
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
 import scala.collection.JavaConverters._
@@ -214,10 +214,14 @@ private[spark] sealed trait MapOutputTrackerMessage
 private[spark] case class GetMapOutputStatuses(shuffleId: Int)
   extends MapOutputTrackerMessage
 private[spark] case class SyncSize(shuffleId: Int, executorId: String, localSize: Int) extends MapOutputTrackerMessage
+private[spark] case class SyncShuffle(shuffleStatuses: mutable.ListBuffer[(String, String)]) extends MapOutputTrackerMessage
+private[spark] case class GetShuffle(ip: String) extends MapOutputTrackerMessage
 private[spark] case object StopMapOutputTracker extends MapOutputTrackerMessage
 
 private[spark] case class GetMapOutputMessage(shuffleId: Int, context: RpcCallContext)
 private[spark] case class SyncSizeMessage(shuffleId: Int, executorId: String, localSize: Int, context: RpcCallContext)
+private[spark] case class SyncShuffleMessage(shuffleStatuses: mutable.ListBuffer[(String, String)], context: RpcCallContext)
+private[spark] case class GetShuffleMessage(ip: String, context: RpcCallContext)
 
 /** RpcEndpoint class for MapOutputTrackerMaster */
 private[spark] class MapOutputTrackerMasterEndpoint(
@@ -236,6 +240,14 @@ private[spark] class MapOutputTrackerMasterEndpoint(
       val hostPort = context.senderAddress.hostPort
       // println("Sync map size for shuffle " + shuffleId + " to " + hostPort)
       val totalSize = tracker.post(new SyncSizeMessage(shuffleId, executorId, localSize, context))
+
+    case SyncShuffle(shuffleStatuses: mutable.ListBuffer[(String, String)]) =>
+      val hostPort = context.senderAddress.hostPort
+      tracker.post(new SyncShuffleMessage(shuffleStatuses, context))
+
+    case GetShuffle(ip: String) =>
+      val hostPort = context.senderAddress.hostPort
+      tracker.post(new GetShuffleMessage(ip, context))
 
     case StopMapOutputTracker =>
       logInfo("MapOutputTrackerMasterEndpoint stopped!")
@@ -299,6 +311,9 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
   def registerLocalMapOutput(shuffleId: Int, mapId: Int, status: MapStatus): Boolean
   def getLocalStatuses(shuffleId: Int): Iterator[(BlockManagerId, Seq[(BlockId, Long)])]
   def syncMapSize(shuffleId: Int, executorId: String): Int
+  def commitShuffle(ip: String, path: String)
+  def syncShuffle()
+  def getShuffle(ip: String): String 
 
   /**
    * Called from executors to get the server URIs and output sizes for each shuffle block that
@@ -367,6 +382,9 @@ private[spark] class MapOutputTrackerMaster(
   // For OPS
   private val syncSizeRequests = new LinkedBlockingQueue[SyncSizeMessage]
   private val mapsNumMap = new ConcurrentHashMap[Int, Map[String, Int]]().asScala
+  private val syncShuffleRequests = new LinkedBlockingQueue[SyncShuffleMessage]
+  private val shufflePathMap = new ConcurrentHashMap[String, ConcurrentLinkedQueue[String]]().asScala
+  private val getShuffleRequests = new LinkedBlockingQueue[GetShuffleMessage]
 
   // Thread pool used for handling map output status requests. This is a separate thread pool
   // to ensure we don't block the normal dispatcher threads.
@@ -382,6 +400,18 @@ private[spark] class MapOutputTrackerMaster(
   private val opsThreadpool: ThreadPoolExecutor = {
     val pool = ThreadUtils.newDaemonFixedThreadPool(1, "ops-dispatcher")
     pool.execute(new OpsMessageLoop)
+    pool
+  }
+
+  private val opsShuffleThreadpool: ThreadPoolExecutor = {
+    val pool = ThreadUtils.newDaemonFixedThreadPool(1, "ops-shuffle-dispatcher")
+    pool.execute(new OpsShuffleMessageLoop)
+    pool
+  }
+
+  private val opsGetShuffleThreadpool: ThreadPoolExecutor = {
+    val pool = ThreadUtils.newDaemonFixedThreadPool(1, "ops-getShuffle-dispatcher")
+    pool.execute(new OpsGetShuffleMessageLoop)
     pool
   }
 
@@ -401,6 +431,14 @@ private[spark] class MapOutputTrackerMaster(
 
   def post(message: SyncSizeMessage): Unit = {
     syncSizeRequests.offer(message)
+  }
+
+  def post(message: SyncShuffleMessage): Unit = {
+    syncShuffleRequests.offer(message)
+  }
+
+  def post(message: GetShuffleMessage): Unit = {
+    getShuffleRequests.offer(message)
   }
 
   /** Message loop used for dispatching messages. */
@@ -455,6 +493,61 @@ private[spark] class MapOutputTrackerMaster(
             // bb.putInt(totalSize)
             // context.reply(bb.array())
             context.reply(totalSize)
+          } catch {
+            case NonFatal(e) => logError(e.getMessage, e)
+          }
+        }
+      } catch {
+        case ie: InterruptedException => // exit
+      }
+    }
+  }
+
+  private class OpsShuffleMessageLoop extends Runnable {
+    override def run(): Unit = {
+      try {
+        while (true) {
+          try {
+            val data = syncShuffleRequests.take()
+            val context = data.context
+            val shuffleStatuses = data.shuffleStatuses
+            val hostPort = context.senderAddress.hostPort
+            var status = null
+            for (status <- shuffleStatuses) {
+              println("Test status: " + shuffleStatuses)
+              if(!shufflePathMap.contains(status._1)) {
+                val list = new ConcurrentLinkedQueue[String]()
+                shufflePathMap.put(status._1, list)
+              }
+              shufflePathMap.get(status._1).get.offer(status._2)
+            }
+            context.reply(true)
+          } catch {
+            case NonFatal(e) => logError(e.getMessage, e)
+          }
+        }
+      } catch {
+        case ie: InterruptedException => // exit
+      }
+    }
+  }
+
+  private class OpsGetShuffleMessageLoop extends Runnable {
+    override def run(): Unit = {
+      try {
+        while (true) {
+          try {
+            val data = getShuffleRequests.take()
+            val context = data.context
+            val ip = data.ip
+            val hostPort = context.senderAddress.hostPort
+            var path: String = null
+            if(shufflePathMap.contains(ip)) {
+              this.synchronized {
+                path = shufflePathMap.get(ip).get.poll()
+              }
+            }
+            context.reply(path)
           } catch {
             case NonFatal(e) => logError(e.getMessage, e)
           }
@@ -740,6 +833,18 @@ private[spark] class MapOutputTrackerMaster(
     return 0
   }
 
+  def syncShuffle(): Unit = {
+    return
+  }
+
+  def commitShuffle(ip: String, path: String): Unit = {
+    return
+  }
+
+  def getShuffle(ip: String): String = {
+    return null
+  }
+
   override def stop() {
     mapOutputRequests.offer(PoisonPill)
     threadpool.shutdown()
@@ -763,6 +868,7 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
 
   // For OPS
   val localMapStatuses = new ConcurrentHashMap[Int, mutable.ArrayBuffer[(Int,MapStatus)]]().asScala
+  val opsShuffleStatuses = new mutable.ListBuffer[(String, String)]()
 
   var isFirst = true
 
@@ -855,6 +961,18 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
     }
     localMapStatuses(shuffleId) += new Tuple2[Int, MapStatus](mapId, status)
     return false
+  }
+
+  def commitShuffle(ip: String, path: String): Unit = { 
+    opsShuffleStatuses += new Tuple2[String, String](ip, path)
+  }
+
+  def syncShuffle(): Unit = {
+    askTracker[Boolean](SyncShuffle(opsShuffleStatuses))
+  }
+
+  def getShuffle(ip: String): String  = {
+    askTracker[String](GetShuffle(ip))
   }
 
   def isMaster(): Boolean = synchronized {

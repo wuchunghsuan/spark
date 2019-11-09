@@ -20,6 +20,8 @@ package org.apache.spark.shuffle.sort;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -73,14 +75,14 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
   private final Partitioner partitioner;
   private final ShuffleWriteMetrics writeMetrics;
   private final int shuffleId;
-  private final int mapId;
+  public final int mapId;
   private final Serializer serializer;
   private final IndexShuffleBlockResolver shuffleBlockResolver;
 
-  private final MapOutputTracker mapOutputTracker;
+  public final MapOutputTracker mapOutputTracker;
   private final String executorId;
   private final int totalMapsNum;
-  private final SparkConf conf;
+  public final SparkConf conf;
 
   /** Array of file writers, one for each partition */
   @Nullable private MapStatus mapStatus;
@@ -154,15 +156,27 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     }
 
     this.numWriters = this.opsWorkers.size();
+    List<Set<Integer>> assignment = schedulePartition(this.numWriters, this.numPartitions);
     this.opsTransferers = new OpsTransferer[this.numWriters];
     for (int i = 0; i < this.numWriters; i++) {
       this.pendingPages.put(i, new ConcurrentLinkedQueue<>());
       // split worker string to ip & port.
       String[] worker = opsWorkers.get(i).split(":");
       assert(worker.length == 2);
-      opsTransferers[i] = new OpsTransferer<K, V>(this, i, worker[0], Integer.parseInt(worker[1]));
+      opsTransferers[i] = new OpsTransferer<K, V>(this, i, worker[0], Integer.parseInt(worker[1]), assignment.get(i));
       opsTransferers[i].start();
     }
+  }
+
+  private List<Set<Integer>> schedulePartition(int numWriters, int numPartitions) {
+    ArrayList<Set<Integer>> ret = new ArrayList<>();
+    for(int i = 0; i < numWriters; i++) {
+      ret.add(new HashSet<Integer>());
+    }
+    for(int i = 0; i < numPartitions; i++) {
+      ret.get(partitionToNum(i)).add(i);
+    }
+    return ret;
   }
 
   private int partitionToNum(int partitionId) {
@@ -255,6 +269,8 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     for (int i = 0; i < numWriters; i++) {
       opsTransferers[i].shutDown();
     }
+    System.out.println("Sync shuffle to master");
+    this.mapOutputTracker.syncShuffle();
 
     System.out.println("Pre-merge total page num: " + pageNum);
 
