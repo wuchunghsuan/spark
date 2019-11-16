@@ -12,7 +12,7 @@ service OpsShuffleData {
 }
 
 message Page {
-    repeated int64 content = 1;
+    bytes content = 1;
     // bytes pointers = 2;
     repeated int64 offsets = 2;
     repeated int64 lengths = 3;

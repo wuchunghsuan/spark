@@ -20,14 +20,28 @@ package org.apache.spark.shuffle.sort;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.List;
 import java.util.LinkedList;
 import java.util.concurrent.TimeUnit;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.io.ObjectOutputStream;
+
+import scala.Tuple2;
+import scala.collection.Iterator;
 
 import org.apache.commons.lang.ArrayUtils;
+import org.apache.spark.storage.BlockManager;
+import org.apache.spark.storage.DiskBlockObjectWriter;
 import org.apache.spark.SparkConf;
 import org.apache.spark.unsafe.UnsafeAlignedOffset;
 import org.apache.spark.unsafe.memory.MemoryBlock;
 import org.apache.spark.unsafe.memory.OpsPointer;
+import org.apache.spark.unsafe.Platform;
+import org.apache.spark.network.buffer.FileSegmentManagedBuffer;
+import org.apache.spark.network.buffer.ManagedBuffer;
 
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -133,45 +147,12 @@ final class OpsTransferer<K, V> extends Thread {
   }
 
   private void shuffle(MemoryBlock block) {
-    // final int uaoSize = UnsafeAlignedOffset.getUaoSize();
-    // final int diskWriteBufferSize = 1024 * 1024;
-    // final byte[] writeBuffer = new byte[diskWriteBufferSize];
 
-    // for (OpsPointer pointer : page.pointers) {
-    //   // DiskBlockObjectWriter writer = partitionWriters[pointer.partitionId];
-    //   final Object recordPage = page.getBaseObject();
-    //   final long recordOffsetInPage = pointer.pageOffset;
-    //   // int dataRemaining = UnsafeAlignedOffset.getSize(recordPage, recordOffsetInPage);
-    //   long dataRemaining = pointer.length;
-    //   long recordReadPosition = recordOffsetInPage;
-    //   while (dataRemaining > 0) {
-    //     final int toTransfer = (int)Math.min(diskWriteBufferSize, dataRemaining);
-    //     // Platform.copyMemory(
-    //     //   recordPage, recordReadPosition, writeBuffer, Platform.BYTE_ARRAY_OFFSET, toTransfer);
-    //     // writer.write(writeBuffer, 0, toTransfer);
-    //     recordReadPosition += toTransfer;
-    //     dataRemaining -= toTransfer;
-    //   }
-    //   // writer.recordWritten();
-    // }
-
-    // long start = System.currentTimeMillis();
-        
-    // long duration = System.currentTimeMillis() - start;
-    // logger.info("[OPS]-" + shuffle.getTask().getJobId() + "-" + start + "-" + duration + "-" + shuffle.getData().length);
     if(!this.partitionSet.contains(block.partitionId)) {
       System.err.println("Wrong page: illegal partition id " + block.partitionId);
       return;
     }
     try {
-      int i = 0;
-      for (OpsPointer pointer : block.pointers) {
-        if(i > 5) {
-            break;
-        }
-        System.out.println("Serialize pointer " + i + " :" + pointer.pageOffset + ", " + pointer.partitionId + ", " + pointer.length);
-        i++;
-      }
       LinkedList<Long> offsets = new LinkedList<>();
       LinkedList<Long> lengths = new LinkedList<>();
       for (OpsPointer pointer : block.pointers) {
@@ -179,21 +160,23 @@ final class OpsTransferer<K, V> extends Thread {
         lengths.add(pointer.length);
       }
 
-      Long[] content = ArrayUtils.toObject((long[])block.getBaseObject());
-
-      i = 0;
-      for (Long tmp : content) {
-          if(i > 5) {
-              break;
-          }
-          System.out.println("Test content " + i + " :" + tmp);
-          i++;
+      ByteArrayOutputStream byteWriter = new ByteArrayOutputStream();
+      for (OpsPointer pointer : block.pointers) {
+        byte[] writeBuffer = new byte[(int)pointer.length];
+        final Object recordPage = block.getBaseObject();
+        final long recordOffsetInPage = pointer.pageOffset;
+        // int dataRemaining = UnsafeAlignedOffset.getSize(recordPage, recordOffsetInPage);
+        Platform.copyMemory(
+            recordPage, pointer.pageOffset, writeBuffer, Platform.BYTE_ARRAY_OFFSET, pointer.length);
+        byteWriter.write(writeBuffer, 0, (int)pointer.length);
       }
+      byte[] content = byteWriter.toByteArray();
+      byteWriter.close();
 
       String path = this.pathMap.get(block.partitionId);
 
       Page page = Page.newBuilder()
-          .addAllContent(Arrays.asList(content))
+          .setContent(ByteString.copyFrom(content, 0, content.length))
           .addAllOffsets(offsets)
           .addAllLengths(lengths)
           .setPath(path).build();
