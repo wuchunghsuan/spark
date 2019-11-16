@@ -125,7 +125,7 @@ public abstract class MemoryConsumer {
   protected MemoryBlock allocateSharedPage(long required) {
     // For OPS, allocate small pages
     // long size = Math.max(pageSize, required) / 3;
-    long size = 5000000; // 5M
+    long size = 3000000; // 5M
     MemoryBlock page = taskMemoryManager.allocateSharedPage(size, this);
     if (page != null) {
       used += page.size();
