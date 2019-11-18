@@ -80,6 +80,7 @@ private[spark] class ShuffleMapTask(
   override def runTask(context: TaskContext): MapStatus = {
     // OPS log
     val start = System.currentTimeMillis()
+    var name = "Map";
     // context.taskMetrics().setOpsMapStart(start)
 
     // Deserialize the RDD using the broadcast variable.
@@ -109,7 +110,6 @@ private[spark] class ShuffleMapTask(
 
       if (!isOpsMaster) {
         opsWriter = manager.getOpsWriter[Any, Any](dep.shuffleHandle, partitionId, context)
-        val start = System.currentTimeMillis()
         
         opsWriter.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
         var mapStatus = opsWriter.stop(success = true).get
@@ -117,6 +117,7 @@ private[spark] class ShuffleMapTask(
         mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, context.partitionId(), mapStatus)
 
       } else {
+        name = "MapMaster"
 
         // Note: skip map computing in ops master.
         mapOutputTracker.registerLocalMapOutput(dep.shuffleHandle.shuffleId, context.partitionId(), mapStatus)
@@ -137,7 +138,7 @@ private[spark] class ShuffleMapTask(
       }
 
       val stop = System.currentTimeMillis()
-      println("[OPS]-Map-" + stageId.toString()
+      println("[OPS]-" + name + "-" + stageId.toString()
           + "-" + appId.get
           + "-" + context.taskAttemptId().toString()
           + "-time"
