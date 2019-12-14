@@ -215,6 +215,7 @@ final class ShuffleBlockFetcherIterator(
   }
 
   private[this] def sendRequest(req: FetchRequest) {
+    println("[OPS-log]-sendRequest-" + System.currentTimeMillis() + "-" + req.address.host)
     logDebug("Sending request for %d blocks (%s) from %s".format(
       req.blocks.size, Utils.bytesToString(req.size), req.address.hostPort))
     bytesInFlight += req.size
