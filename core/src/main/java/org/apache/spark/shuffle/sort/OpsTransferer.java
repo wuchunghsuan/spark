@@ -61,7 +61,7 @@ final class OpsTransferer<K, V> extends Thread {
   private final StreamObserver<Page> requestObserver;
   private final Set<Integer> partitionSet;
   private final HashMap<Integer, String> pathMap;
-
+  private int count = 0;
 
   public OpsTransferer(OpsPreShuffleWriter<K, V> master, int id, String ip, int port, Set<Integer> partitionSet) {
     this.masterWriter = master;
@@ -152,6 +152,13 @@ final class OpsTransferer<K, V> extends Thread {
       System.err.println("Wrong page: illegal partition id " + block.partitionId);
       return;
     }
+
+    count++;
+    if(count > 30) {
+      System.out.println("[OPS-log]-sendRequest-" + System.currentTimeMillis() + "-" + this.targetIp);
+      count = 0;
+    }
+
     try {
       LinkedList<Long> offsets = new LinkedList<>();
       LinkedList<Long> lengths = new LinkedList<>();
