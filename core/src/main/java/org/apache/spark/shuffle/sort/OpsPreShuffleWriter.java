@@ -199,6 +199,10 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     return pendingList.poll();
   }
 
+  public void freeSharedPage(int pageNum) {
+    memoryManager.freeSharedPage(pageNum);
+  }
+
   public void freeSharedPage(MemoryBlock page) {
     memoryManager.freeSharedPage(page);
   }
@@ -225,7 +229,7 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
       // memoryManager.testSharedPages();
       int completedMaps = this.mapOutputTracker.syncMapSize(this.shuffleId, this.executorId);
       if (completedMaps >= this.totalMapsNum) {
-        System.out.println("The last time to getSharedPages, all maps done");
+        System.out.println("The last time to getSharedPages, all maps done: " + completedMaps);
         isLast = true;
       }
 
@@ -249,23 +253,30 @@ final class OpsPreShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     }
 
     // wait for all pages done
-    while (true) {
-      boolean isEmpty = true;
-      for (int i = 0; i < this.numWriters; i++) {
-        if (!this.pendingPages.get(i).isEmpty()) {
-          isEmpty = false;
-          break;
-        }
-      }
-      if (isEmpty) {
-        break;
-      }
-      try {
-        Thread.sleep(3000);
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      }
-    }
+    // int count = 0;
+    // while (true) {
+    //   boolean isEmpty = true;
+    //   System.out.println("wait for all pages done, count = " + count );
+    //   for (int i = 0; i < this.numWriters; i++) {
+    //     if (!this.pendingPages.get(i).isEmpty()) {
+    //       isEmpty = false;
+    //       break;
+    //     }
+    //   }
+    //   if (isEmpty) {
+    //     break;
+    //   }
+    //   if (count > 5) {
+    //     System.out.println("wait for all pages done, can't wait.");
+    //     break;
+    //   }
+    //   count++;
+    //   try {
+    //     Thread.sleep(3000);
+    //   } catch (InterruptedException e) {
+    //     e.printStackTrace();
+    //   }
+    // }
     for (int i = 0; i < numWriters; i++) {
       opsTransferers[i].shutDown();
     }

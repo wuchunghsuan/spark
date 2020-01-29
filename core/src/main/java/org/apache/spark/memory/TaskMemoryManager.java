@@ -335,7 +335,7 @@ public class TaskMemoryManager {
     }
     MemoryBlock page = null;
     try {
-      page = memoryManager.tungstenMemoryAllocator().allocate(acquired);
+      page = memoryManager.opsSharedMemoryAllocator().allocate(acquired);
     } catch (OutOfMemoryError e) {
       logger.warn("Failed to allocate a page ({} bytes), try again.", acquired);
       // there is no enough memory actually, it means the actual free memory is smaller than
@@ -377,6 +377,10 @@ public class TaskMemoryManager {
     releaseExecutionMemory(pageSize, consumer);
   }
 
+  public void freeSharedPage(int pageNum) {
+    memoryManager.opsSharedMemoryAllocator().free(pageNum);
+  }
+
   public void freeSharedPage(MemoryBlock page) {
     assert (page.pageNumber != MemoryBlock.NO_PAGE_NUMBER) :
       "Called freePage() on memory that wasn't allocated with allocatePage()";
@@ -386,7 +390,7 @@ public class TaskMemoryManager {
             "Called freePage() on a memory block that has already been freed";
 
     long pageSize = page.size();
-    memoryManager.tungstenMemoryAllocator().free(page);
+    memoryManager.opsSharedMemoryAllocator().free(page);
     // releaseExecutionMemory(pageSize, consumer);
     // memoryManager.releaseExecutionMemory(pageSize, taskAttemptId, tungstenMemoryMode);
   }
@@ -494,8 +498,8 @@ public class TaskMemoryManager {
 
   public void cleanUpAllSharedMemory() {
     System.out.println("Clean up OPS shared memory.");
-    memoryManager.tungstenMemoryAllocator().cleanUpAllMemory();
-    memoryManager.cleanOpsAllocator();
+    memoryManager.opsSharedMemoryAllocator().cleanUpAllMemory();
+    // memoryManager.cleanOpsAllocator();
   }
 
   /**
@@ -513,10 +517,10 @@ public class TaskMemoryManager {
   }
 
   public List<MemoryBlock> getSharedPages() {
-    return memoryManager.tungstenMemoryAllocator().getSharedPages();
+    return memoryManager.opsSharedMemoryAllocator().getSharedPages();
   }
 
   public void addSharedPage(int pageNumber) {
-    memoryManager.tungstenMemoryAllocator().addSharedPage(pageNumber);
+    memoryManager.opsSharedMemoryAllocator().addSharedPage(pageNumber);
   }
 }

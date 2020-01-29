@@ -75,7 +75,7 @@ final class OpsTransferer<K, V> extends Thread {
       String path = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/") 
           + OpsUtils.getMapOutputPath(
             masterWriter.conf.getAppId(), 
-            Integer.toString(this.masterWriter.mapId), 
+            "0", 
             partitionId);
       this.pathMap.put(partitionId, path);
     }
@@ -89,7 +89,7 @@ final class OpsTransferer<K, V> extends Thread {
 
       @Override
       public void onNext(Ack ack) {
-
+        masterWriter.freeSharedPage(ack.getPageNum());
       }
       
       @Override
@@ -131,7 +131,7 @@ final class OpsTransferer<K, V> extends Thread {
           page = this.masterWriter.getPage(id);
           // Shuffle
           shuffle(page);
-          this.masterWriter.freeSharedPage(page);  
+          // this.masterWriter.freeSharedPage(page);
           page = null;    
         } finally {
           if (page != null) {
@@ -154,18 +154,18 @@ final class OpsTransferer<K, V> extends Thread {
     }
 
     count++;
-    if(count > 30) {
+    if(count > 100) {
       System.out.println("[OPS-log]-sendRequest-" + System.currentTimeMillis() + "-" + this.targetIp);
       count = 0;
     }
 
     try {
-      LinkedList<Long> offsets = new LinkedList<>();
-      LinkedList<Long> lengths = new LinkedList<>();
-      for (OpsPointer pointer : block.pointers) {
-        offsets.add(pointer.pageOffset);
-        lengths.add(pointer.length);
-      }
+      // LinkedList<Long> offsets = new LinkedList<>();
+      // LinkedList<Long> lengths = new LinkedList<>();
+      // for (OpsPointer pointer : block.pointers) {
+      //   offsets.add(pointer.pageOffset);
+      //   lengths.add(pointer.length);
+      // }
 
       ByteArrayOutputStream byteWriter = new ByteArrayOutputStream();
       for (OpsPointer pointer : block.pointers) {
@@ -184,8 +184,9 @@ final class OpsTransferer<K, V> extends Thread {
 
       Page page = Page.newBuilder()
           .setContent(ByteString.copyFrom(content, 0, content.length))
-          .addAllOffsets(offsets)
-          .addAllLengths(lengths)
+          .setPageNum(block.pageNumber)
+          // .addAllOffsets(offsets)
+          // .addAllLengths(lengths)
           .setPath(path).build();
       // logger.debug("Transfer data. Length: " + block.getBaseObject().length);
       this.requestObserver.onNext(page);
@@ -205,17 +206,19 @@ final class OpsTransferer<K, V> extends Thread {
     this.stopped = true;
     try {
       this.requestObserver.onCompleted();
+      // channel.shutdown().awaitTermination(100, TimeUnit.MILLISECONDS);
       commit();
       interrupt();
       join(5000);
     } catch (Exception ie) {
       ie.printStackTrace();
     }
+    System.out.println("Transferer shutDown.");
   }
 
   private void commit() {
     for (String path : this.pathMap.values()) {
-      System.out.println("Commit shuffle: " + targetIp + ": " + path);
+      // System.out.println("Commit shuffle: " + targetIp + ": " + path);
       this.masterWriter.mapOutputTracker.commitShuffle(targetIp, path);
     }
   }
