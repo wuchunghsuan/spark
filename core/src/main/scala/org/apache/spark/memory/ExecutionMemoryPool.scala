@@ -126,7 +126,7 @@ private[memory] class ExecutionMemoryPool(
       val maxPoolSize = computeMaxPoolSize()
 
       // OPS: Due to using pre-merge, we need to reserve enough memory capacity for the large shuffle data. 
-      val maxMemoryPerTask = maxPoolSize / numActiveTasks - 300000000
+      val maxMemoryPerTask = maxPoolSize / numActiveTasks - 1000000000 // 1G
       val minMemoryPerTask = poolSize / (2 * numActiveTasks) - 300000000
 
       // How much we can grant this task; keep its share within 0 <= X <= 1 / numActiveTasks

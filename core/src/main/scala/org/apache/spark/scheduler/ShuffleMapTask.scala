@@ -160,6 +160,7 @@ private[spark] class ShuffleMapTask(
         try {
           if (writer != null) {
             writer.stop(success = false)
+            opsWriter.stop(success = false)
           }
         } catch {
           case e: Exception =>

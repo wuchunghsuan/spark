@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.LinkedList;
+import java.util.HashMap;
 
 import scala.Tuple2;
 
@@ -108,10 +109,14 @@ final class OpsSharedManager extends MemoryConsumer {
   // These variables are reset after spilling:
   // @Nullable private ShuffleInMemorySorter inMemSorter;
   // @Nullable private MemoryBlock currentPage = null;
-  private MemoryBlock[] currentPages;
+  // private MemoryBlock[] currentPages;
+
+  private final HashMap<Integer, MemoryBlock[]> pagesMap = new HashMap<>();
+
+  private final HashMap<Integer, Long[]> cursorsMap = new HashMap<>();
 
   // private long pageCursor = -1;
-  private long[] pageCursors;
+  // private long[] pageCursors;
 
   OpsSharedManager(
       TaskMemoryManager memoryManager,
@@ -136,8 +141,8 @@ final class OpsSharedManager extends MemoryConsumer {
     this.writeMetrics = writeMetrics;
     this.diskWriteBufferSize =
         (int) (long) conf.get(package$.MODULE$.SHUFFLE_DISK_WRITE_BUFFER_SIZE());
-    this.currentPages = new MemoryBlock[numPartitions];
-    this.pageCursors = new long[numPartitions];
+    // this.currentPages = new MemoryBlock[numPartitions];
+    // this.pageCursors = new long[numPartitions];
   }
   
   /**
@@ -150,14 +155,30 @@ final class OpsSharedManager extends MemoryConsumer {
 
   private void updatePeakMemoryUsed() { }
 
-  /**
-   * Force all memory and spill files to be deleted; called by shuffle error-handling code.
-   */
-  public void cleanupResources() {
+  public void flush(int mapId) {
+    MemoryBlock[] currentPages = this.pagesMap.get(mapId);
     for (int i = 0; i < numPartitions; i++) {
       if (currentPages[i] != null) {
         addSharedPage(currentPages[i].pageNumber);
         currentPages[i] = null;
+      }
+    }
+
+    // clean up resource by map id
+    this.pagesMap.remove(mapId);
+    this.cursorsMap.remove(mapId);
+  }
+
+  /**
+   * Force all memory and spill files to be deleted; called by shuffle error-handling code.
+   */
+  public void cleanupResources() {
+    for (MemoryBlock[] currentPages : this.pagesMap.values()) {
+      for (int i = 0; i < numPartitions; i++) {
+        if (currentPages[i] != null) {
+          addSharedPage(currentPages[i].pageNumber);
+          currentPages[i] = null;
+        }
       }
     }
   }
@@ -171,7 +192,13 @@ final class OpsSharedManager extends MemoryConsumer {
    *                      that exceed the page size are handled via a different code path which uses
    *                      special overflow pages).
    */
-  private void acquireNewPageIfNecessary(int required, int partitionId) {
+  private void acquireNewPageIfNecessary(int required, int partitionId, int mapId) {
+    if (!this.pagesMap.containsKey(mapId)) {
+      this.pagesMap.put(mapId, new MemoryBlock[this.numPartitions]);
+      this.cursorsMap.put(mapId, new Long[this.numPartitions]);
+    }
+    MemoryBlock[] currentPages = this.pagesMap.get(mapId);
+    Long[] pageCursors = this.cursorsMap.get(mapId);
     if (currentPages[partitionId] == null ||
       pageCursors[partitionId] + required > currentPages[partitionId].getBaseOffset() + currentPages[partitionId].size() ) {
       if (currentPages[partitionId] != null) {
@@ -187,6 +214,7 @@ final class OpsSharedManager extends MemoryConsumer {
             continue;
           }
           currentPages[partitionId].partitionId = partitionId;
+          currentPages[partitionId].mapId = mapId;
           pageCursors[partitionId] = currentPages[partitionId].getBaseOffset();
         } catch (InterruptedException e) {
           e.printStackTrace();
@@ -198,14 +226,16 @@ final class OpsSharedManager extends MemoryConsumer {
   /**
    * Write a record to the shuffle sorter.
    */
-  public void insertRecord(Object recordBase, long recordOffset, int length, int partitionId)
+  public void insertRecord(Object recordBase, long recordOffset, int length, int partitionId, int mapId)
     throws IOException {
     // final int uaoSize = UnsafeAlignedOffset.getUaoSize();
     // Need 4 or 8 bytes to store the record length.
     // final int required = length + uaoSize;
     final int required = length;
-    acquireNewPageIfNecessary(required, partitionId);
+    acquireNewPageIfNecessary(required, partitionId, mapId);
 
+    MemoryBlock[] currentPages = this.pagesMap.get(mapId);
+    Long[] pageCursors = this.cursorsMap.get(mapId);
     assert(currentPages[partitionId] != null);
     final Object base = currentPages[partitionId].getBaseObject();
 

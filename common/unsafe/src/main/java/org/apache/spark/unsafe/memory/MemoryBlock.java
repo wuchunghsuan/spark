@@ -57,8 +57,11 @@ public class MemoryBlock extends MemoryLocation {
    */
   public int pageNumber = NO_PAGE_NUMBER;
 
+  public static final int LAST_PAGE = -10;
+
   public List<OpsPointer> pointers = new LinkedList<>();
   public int partitionId = 0;
+  public int mapId = 0;
 
   public MemoryBlock(@Nullable Object obj, long offset, long length) {
     super(obj, offset);

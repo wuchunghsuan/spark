@@ -20,6 +20,7 @@ package org.apache.spark.shuffle.sort;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.List;
 import java.util.LinkedList;
 import java.util.concurrent.TimeUnit;
@@ -60,7 +61,9 @@ final class OpsTransferer<K, V> extends Thread {
   private final ManagedChannel channel;
   private final StreamObserver<Page> requestObserver;
   private final Set<Integer> partitionSet;
-  private final HashMap<Integer, String> pathMap;
+  // private final HashMap<Integer, String> pathMap;
+  private final Set<String> pathSet = new HashSet<>();
+  private final String homePath;
   private int count = 0;
 
   public OpsTransferer(OpsPreShuffleWriter<K, V> master, int id, String ip, int port, Set<Integer> partitionSet) {
@@ -69,16 +72,17 @@ final class OpsTransferer<K, V> extends Thread {
     this.targetIp = ip;
     this.targetPort = port;
     this.partitionSet = partitionSet;
-    this.pathMap = new HashMap<>();
+    // this.pathMap = new HashMap<>();
+    this.homePath = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/");
     
-    for (Integer partitionId : partitionSet) {
-      String path = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/") 
-          + OpsUtils.getMapOutputPath(
-            masterWriter.conf.getAppId(), 
-            Integer.toString(this.masterWriter.mapId), 
-            partitionId);
-      this.pathMap.put(partitionId, path);
-    }
+    // for (Integer partitionId : partitionSet) {
+    //   String path = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/") 
+    //       + OpsUtils.getMapOutputPath(
+    //         masterWriter.conf.getAppId(), 
+    //         "0", 
+    //         partitionId);
+    //   this.pathMap.put(partitionId, path);
+    // }
 
     System.out.println("OpsTransferer start. Target: " + ip + ":" + port + ". PartitionSet: " + partitionSet);
 
@@ -89,7 +93,7 @@ final class OpsTransferer<K, V> extends Thread {
 
       @Override
       public void onNext(Ack ack) {
-
+        masterWriter.freeSharedPage(ack.getPageNum());
       }
       
       @Override
@@ -131,7 +135,7 @@ final class OpsTransferer<K, V> extends Thread {
           page = this.masterWriter.getPage(id);
           // Shuffle
           shuffle(page);
-          this.masterWriter.freeSharedPage(page);  
+          // this.masterWriter.freeSharedPage(page);
           page = null;    
         } finally {
           if (page != null) {
@@ -154,18 +158,18 @@ final class OpsTransferer<K, V> extends Thread {
     }
 
     count++;
-    if(count > 30) {
+    if(count > 100) {
       System.out.println("[OPS-log]-sendRequest-" + System.currentTimeMillis() + "-" + this.targetIp);
       count = 0;
     }
 
     try {
-      LinkedList<Long> offsets = new LinkedList<>();
-      LinkedList<Long> lengths = new LinkedList<>();
-      for (OpsPointer pointer : block.pointers) {
-        offsets.add(pointer.pageOffset);
-        lengths.add(pointer.length);
-      }
+      // LinkedList<Long> offsets = new LinkedList<>();
+      // LinkedList<Long> lengths = new LinkedList<>();
+      // for (OpsPointer pointer : block.pointers) {
+      //   offsets.add(pointer.pageOffset);
+      //   lengths.add(pointer.length);
+      // }
 
       ByteArrayOutputStream byteWriter = new ByteArrayOutputStream();
       for (OpsPointer pointer : block.pointers) {
@@ -180,12 +184,19 @@ final class OpsTransferer<K, V> extends Thread {
       byte[] content = byteWriter.toByteArray();
       byteWriter.close();
 
-      String path = this.pathMap.get(block.partitionId);
+      // String path = this.pathMap.get(block.partitionId);
+      String path = this.homePath
+          + OpsUtils.getMapOutputPath(
+            this.masterWriter.conf.getAppId(), 
+            Integer.toString(block.mapId), 
+            block.partitionId);
+      this.pathSet.add(path);
 
       Page page = Page.newBuilder()
           .setContent(ByteString.copyFrom(content, 0, content.length))
-          .addAllOffsets(offsets)
-          .addAllLengths(lengths)
+          .setPageNum(block.pageNumber)
+          // .addAllOffsets(offsets)
+          // .addAllLengths(lengths)
           .setPath(path).build();
       // logger.debug("Transfer data. Length: " + block.getBaseObject().length);
       this.requestObserver.onNext(page);
@@ -205,17 +216,22 @@ final class OpsTransferer<K, V> extends Thread {
     this.stopped = true;
     try {
       this.requestObserver.onCompleted();
+      // channel.shutdown().awaitTermination(100, TimeUnit.MILLISECONDS);
       commit();
       interrupt();
       join(5000);
     } catch (Exception ie) {
       ie.printStackTrace();
     }
+    System.out.println("Transferer shutDown.");
   }
 
   private void commit() {
-    for (String path : this.pathMap.values()) {
-      System.out.println("Commit shuffle: " + targetIp + ": " + path);
+    // for (String path : this.pathMap.values()) {
+    //   // System.out.println("Commit shuffle: " + targetIp + ": " + path);
+    //   this.masterWriter.mapOutputTracker.commitShuffle(targetIp, path);
+    // }
+    for (String path : this.pathSet) {
       this.masterWriter.mapOutputTracker.commitShuffle(targetIp, path);
     }
   }

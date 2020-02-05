@@ -33,7 +33,7 @@ import org.apache.spark.unsafe.Platform;
  */
 public class OpsSharedMemoryAllocator implements MemoryAllocator {
 
-  private static final int PAGE_TABLE_SIZE = 8192;
+  private static final int PAGE_TABLE_SIZE = 81920;
   private MemoryBlock[] pageTable = new MemoryBlock[PAGE_TABLE_SIZE];
   private BitSet allocatedPages = new BitSet(PAGE_TABLE_SIZE);
   private List<Integer> pageNumList = new LinkedList<>();
@@ -41,17 +41,17 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
   private int usedPages = 0;
   private int totalPages = 0;
   // private static final long MEMORY_LIMIT = 12000;
-  private long MEMORY_LIMIT = 12000;
+  private long MEMORY_LIMIT = 4000000000L;
 
   public OpsSharedMemoryAllocator(long limit) {
-    this.MEMORY_LIMIT = limit;
+    // this.MEMORY_LIMIT = limit;
     System.out.println("OpsSharedMemoryAllocator memory limit: " + this.MEMORY_LIMIT);
   }
 
   @GuardedBy("this")
   private final Map<Long, LinkedList<WeakReference<long[]>>> bufferPoolsBySize = new HashMap<>();
 
-  private static final int POOLING_THRESHOLD_BYTES = 1024 * 1024;
+  private static final int POOLING_THRESHOLD_BYTES = 128 * 1024;
 
   /**
    * Returns true if allocations of the given size should go through the pooling mechanism and
@@ -131,6 +131,10 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     return memory;
   }
 
+  public void free(int pageNum) {
+    this.free(this.pageTable[pageNum]);
+  }
+
   @Override
   public void free(MemoryBlock memory) {
     assert (memory.obj != null) :
@@ -163,6 +167,7 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
     memory.setObjAndOffset(null, 0);
 
     long alignedSize = ((size + 7) / 8) * 8;
+    // System.out.println("Free page without pool, used: " + this.usedMemory);
     if (shouldPool(alignedSize)) {
       synchronized (this) {
         LinkedList<WeakReference<long[]>> pool = bufferPoolsBySize.get(alignedSize);
@@ -196,16 +201,16 @@ public class OpsSharedMemoryAllocator implements MemoryAllocator {
 
   @Override
   public List<MemoryBlock> getSharedPages() {
-    if (this.pageNumList.size() == 0) {
-      return new LinkedList<>();
-    }
-    List<MemoryBlock> pages = new LinkedList<>();
     synchronized(this) {
+      if (this.pageNumList.size() == 0) {
+        return new LinkedList<>();
+      }
+      List<MemoryBlock> pages = new LinkedList<>();
       for (int index : this.pageNumList) {
         pages.add(this.pageTable[index]);
       }
       this.pageNumList.clear();
+      return pages;
     }
-    return pages;
   }
 }

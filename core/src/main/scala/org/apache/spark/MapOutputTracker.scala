@@ -383,6 +383,7 @@ private[spark] class MapOutputTrackerMaster(
   private val syncSizeRequests = new LinkedBlockingQueue[SyncSizeMessage]
   private val mapsNumMap = new ConcurrentHashMap[Int, Map[String, Int]]().asScala
   private val syncShuffleRequests = new LinkedBlockingQueue[SyncShuffleMessage]
+  private val shufflePathSet = new ConcurrentHashMap[String, mutable.Set[String]]().asScala
   private val shufflePathMap = new ConcurrentHashMap[String, ConcurrentLinkedQueue[String]]().asScala
   private val getShuffleRequests = new LinkedBlockingQueue[GetShuffleMessage]
 
@@ -514,12 +515,17 @@ private[spark] class MapOutputTrackerMaster(
             val hostPort = context.senderAddress.hostPort
             var status = null
             for (status <- shuffleStatuses) {
-              println("Test status: " + shuffleStatuses)
+              // println("Test status: " + shuffleStatuses)
               if(!shufflePathMap.contains(status._1)) {
                 val list = new ConcurrentLinkedQueue[String]()
                 shufflePathMap.put(status._1, list)
+                val set: mutable.Set[String] = mutable.Set()
+                shufflePathSet.put(status._1, set)
               }
-              shufflePathMap.get(status._1).get.offer(status._2)
+              if(!shufflePathSet.get(status._1).contains(status._2)) {
+                shufflePathSet.get(status._1).get.add(status._2)
+                shufflePathMap.get(status._1).get.offer(status._2)
+              }
             }
             context.reply(true)
           } catch {

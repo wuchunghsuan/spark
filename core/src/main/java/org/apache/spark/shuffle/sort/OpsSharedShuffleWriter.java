@@ -229,7 +229,7 @@ public class OpsSharedShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     assert (serializedRecordSize > 0);
 
     sorter.insertRecord(
-      serBuffer.getBuf(), Platform.BYTE_ARRAY_OFFSET, serializedRecordSize, partitionId);
+      serBuffer.getBuf(), Platform.BYTE_ARRAY_OFFSET, serializedRecordSize, partitionId, this.mapId);
   }
 
   @Override
@@ -254,6 +254,7 @@ public class OpsSharedShuffleWriter<K, V> extends ShuffleWriter<K, V> {
       if (sorter != null) {
         // If sorter is non-null, then this implies that we called stop() in response to an error,
         // so we need to clean up memory and spill files created by the sorter
+        sorter.flush(mapId);
         sorter.cleanupResources();
       }
     }
