@@ -23,7 +23,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import javax.annotation.concurrent.GuardedBy
 
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet, Queue}
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet, Queue, Set}
 
 import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.internal.Logging
@@ -64,7 +64,7 @@ import java.io.File
  */
 private[spark]
 final class OpsFetcherIterator(
-    localPath: String,
+    pathSet: Set[String],
     context: TaskContext,
     shuffleClient: ShuffleClient,
     blockManager: BlockManager,
@@ -106,7 +106,7 @@ final class OpsFetcherIterator(
    * A queue to hold our results. This turns the asynchronous model provided by
    * [[org.apache.spark.network.BlockTransferService]] into a synchronous model (iterator).
    */
-  private[this] val results = new LinkedBlockingQueue[FetchResult]
+  // private[this] val results = new LinkedBlockingQueue[FetchResult]
 
   /**
    * Current [[FetchResult]] being processed. We track this so we can release the current buffer
@@ -158,7 +158,10 @@ final class OpsFetcherIterator(
   private[this] val shuffleFilesSet = mutable.HashSet[DownloadFile]()
 
   // OPS
-  private[this] var isLoadLocalPath = false
+  private[this] var numFileToFetch = 0
+  private[this] var numFetchDone = 0
+
+  private[this] val paths = new LinkedBlockingQueue[String]
 
   // Decrements the buffer reference count.
   // The currentResult is set to null to prevent releasing the buffer again on cleanup()
@@ -187,8 +190,19 @@ final class OpsFetcherIterator(
     }
   }
 
+  initialize()
+
+  private[this] def initialize(): Unit = {
+    numFileToFetch = pathSet.size
+    for(path: String <- pathSet) {
+      paths.put(path)
+    }
+
+    println("Initialize OpsFetcher. Load " + numFileToFetch + " paths.")
+  }
+
   // override def hasNext: Boolean = numBlocksProcessed < numBlocksToFetch
-  override def hasNext: Boolean = !isLoadLocalPath
+  override def hasNext: Boolean = numFetchDone < numFileToFetch
 
   /**
    * Fetches the next (BlockId, InputStream). If a task fails, the ManagedBuffers
@@ -204,8 +218,10 @@ final class OpsFetcherIterator(
       throw new NoSuchElementException
     }
 
-    isLoadLocalPath = true
-    // val buf = blockManager.getBlockData(blockId)
+    numFetchDone += 1
+
+    val localPath = paths.take()
+
     val dataFile = new File(localPath)
     val buf = new FileSegmentManagedBuffer(
         SparkTransportConf.fromSparkConf(blockManager.conf, "shuffle"),

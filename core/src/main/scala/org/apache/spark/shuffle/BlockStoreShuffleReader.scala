@@ -17,6 +17,8 @@
 
 package org.apache.spark.shuffle
 
+import scala.collection.mutable.Set
+
 import org.apache.spark._
 import org.apache.spark.internal.{config, Logging}
 import org.apache.spark.serializer.SerializerManager
@@ -49,14 +51,14 @@ private[spark] class BlockStoreShuffleReader[K, C](
     context.taskMetrics().setOpsFetchStart(start)
 
     val addr: InetAddress = InetAddress.getLocalHost()
-    val path: String = mapOutputTracker.getShuffle(addr.getHostAddress())
-    if(path == null) {
-      println("Get null path.")
+    val pathSet: Set[String] = mapOutputTracker.getShuffle(addr.getHostAddress())
+    if(pathSet.size == 0) {
+      println("Number of pathSet is 0.")
     }
-    println("Reader on " + addr.getHostAddress() + " get path: " + path)
+    // println("Reader on " + addr.getHostAddress() + " get path: " + path)
 
     val wrappedStreams = new OpsFetcherIterator(
-      path,
+      pathSet,
       context,
       blockManager.shuffleClient,
       blockManager,
@@ -73,8 +75,14 @@ private[spark] class BlockStoreShuffleReader[K, C](
 
 
     // Create a key/value iterator for each stream
-    val input = wrappedStreams.next()
-    val recordIter = serializerInstance.deserializeStream(input).asKeyValueIterator
+    // val input = wrappedStreams.next()
+    // val recordIter = serializerInstance.deserializeStream(input).asKeyValueIterator
+    val recordIter = wrappedStreams.flatMap { case wrappedStream =>
+      // Note: the asKeyValueIterator below wraps a key/value iterator inside of a
+      // NextIterator. The NextIterator makes sure that close() is called on the
+      // underlying InputStream when all records have been read.
+      serializerInstance.deserializeStream(wrappedStream).asKeyValueIterator
+    }
 
     // Update the context task metrics for each record read.
     val readMetrics = context.taskMetrics.createTempShuffleReadMetrics()

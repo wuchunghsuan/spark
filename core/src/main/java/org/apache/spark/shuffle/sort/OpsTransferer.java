@@ -61,8 +61,7 @@ final class OpsTransferer<K, V> extends Thread {
   private final ManagedChannel channel;
   private final StreamObserver<Page> requestObserver;
   private final Set<Integer> partitionSet;
-  // private final HashMap<Integer, String> pathMap;
-  private final Set<String> pathSet = new HashSet<>();
+  private final HashMap<Integer, Set<String>> pathMap = new HashMap<>();
   private final String homePath;
   private int count = 0;
 
@@ -72,17 +71,16 @@ final class OpsTransferer<K, V> extends Thread {
     this.targetIp = ip;
     this.targetPort = port;
     this.partitionSet = partitionSet;
-    // this.pathMap = new HashMap<>();
     this.homePath = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/");
     
-    // for (Integer partitionId : partitionSet) {
-    //   String path = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/") 
-    //       + OpsUtils.getMapOutputPath(
-    //         masterWriter.conf.getAppId(), 
-    //         "0", 
-    //         partitionId);
-    //   this.pathMap.put(partitionId, path);
-    // }
+    for (Integer partitionId : partitionSet) {
+      // String path = masterWriter.conf.get("spark.ops.tmpDir", "/home/root/tmpOps/") 
+      //     + OpsUtils.getMapOutputPath(
+      //       masterWriter.conf.getAppId(), 
+      //       "0", 
+      //       partitionId);
+      this.pathMap.put(partitionId, new HashSet<>());
+    }
 
     System.out.println("OpsTransferer start. Target: " + ip + ":" + port + ". PartitionSet: " + partitionSet);
 
@@ -190,7 +188,8 @@ final class OpsTransferer<K, V> extends Thread {
             this.masterWriter.conf.getAppId(), 
             Integer.toString(block.mapId), 
             block.partitionId);
-      this.pathSet.add(path);
+      this.pathMap.get(block.partitionId).add(path);
+      // this.pathSet.add(path);
 
       Page page = Page.newBuilder()
           .setContent(ByteString.copyFrom(content, 0, content.length))
@@ -227,12 +226,9 @@ final class OpsTransferer<K, V> extends Thread {
   }
 
   private void commit() {
-    // for (String path : this.pathMap.values()) {
-    //   // System.out.println("Commit shuffle: " + targetIp + ": " + path);
-    //   this.masterWriter.mapOutputTracker.commitShuffle(targetIp, path);
-    // }
-    for (String path : this.pathSet) {
-      this.masterWriter.mapOutputTracker.commitShuffle(targetIp, path);
+    for (Integer partitionId : this.pathMap.keySet()) {
+      // System.out.println("Commit shuffle: " + targetIp + ": " + path);
+      this.masterWriter.mapOutputTracker.commitShuffle(targetIp, partitionId, this.pathMap.get(partitionId));
     }
   }
 }
